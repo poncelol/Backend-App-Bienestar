@@ -1,0 +1,15 @@
+# Dependencias y estado local de wrangler
+node_modules/
+.wrangler/
+
+# Claves y vínculos privados: nunca a git
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+admin_config.json
+
+# Archivos de datos
+*.xlsx
+
+__pycache__/

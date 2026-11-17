@@ -1,0 +1,34 @@
+// Servidor de Abasto Bienestar en Cloudflare Workers (plan gratuito). Ver README.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "abasto-bienestar",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+
+  // Cada 15 minutos se descarga de nuevo el Excel del catálogo de SharePoint
+  "triggers": { "crons": ["*/15 * * * *"] },
+
+  // Base de datos: imágenes, regiones y configuración (tablas en schema.sql)
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "abasto-bienestar",
+      // Pegue aquí el database_id que imprime: npx wrangler d1 create abasto-bienestar
+      "database_id": "bc2c037c-2a55-4a26-bc04-291fa9d80e3b"
+    }
+  ],
+
+  // Archivos: la copia del Excel del catálogo y las fotos que se suben con admin_bienestar.py
+  "kv_namespaces": [
+    {
+      "binding": "ARCHIVOS",
+      // Pegue aquí el id que imprime: npx wrangler kv namespace create ARCHIVOS
+      "id": "1a079e7e020546a3b48acc08acb5809a"
+    }
+  ]
+
+  // Las claves NO van aquí (este archivo se sube a git). Se guardan como secretos:
+  //   npx wrangler secret put ADMIN_TOKEN     clave de admin_bienestar.py
+  //   npx wrangler secret put LINK_CATALOGO   vínculo para compartir del Excel del catálogo
+}
