@@ -9,6 +9,8 @@
   // Solo la dirección *.workers.dev, que es la que protege Access; sin direcciones de vista previa
   "workers_dev": true,
   "preview_urls": false,
+  // Sin tareas programadas: la descarga del catálogo cada 15 min la hace solo el Worker público
+  "triggers": { "crons": [] },
 
   // La misma base de datos y el mismo almacén que el Worker público (wrangler.jsonc)
   "d1_databases": [
