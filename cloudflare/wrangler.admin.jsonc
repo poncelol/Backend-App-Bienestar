@@ -1,32 +1,43 @@
-// Panel web de administración (src/admin.ts + src/panel.html). Toda su dirección va protegida con Cloudflare Access.
-// Publicar: npm run deploy:admin    ·    Probar en la computadora: npm run dev:admin
+// Servidor de Abasto Bienestar en Cloudflare Workers (plan gratuito). Ver README.md.
+// wrangler.jsonc y wrangler.admin.jsonc son IGUALES salvo el nombre: los dos Workers publican el mismo código
+// (src/worker.ts), que según la dirección atiende como servidor de la app o como panel. Así, aunque una publicación
+// use la configuración del otro, nada se rompe. Si cambia algo aquí, cámbielo también en el otro archivo.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "abasto-bienestar-admin",
-  "main": "src/admin.ts",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
-  // Solo la dirección *.workers.dev, que es la que protege Access; sin direcciones de vista previa
-  "workers_dev": true,
-  "preview_urls": false,
-  // Sin tareas programadas: la descarga del catálogo cada 15 min la hace solo el Worker público
-  "triggers": { "crons": [] },
 
-  // La misma base de datos y el mismo almacén que el Worker público (wrangler.jsonc)
+  // Cada 15 minutos se descarga de nuevo el Excel del catálogo de SharePoint
+  "triggers": { "crons": ["*/15 * * * *"] },
+
+  // Base de datos: imágenes, regiones y configuración (tablas en schema.sql)
   "d1_databases": [
-    { "binding": "DB", "database_name": "abasto-bienestar", "database_id": "bc2c037c-2a55-4a26-bc04-291fa9d80e3b" }
+    {
+      "binding": "DB",
+      "database_name": "abasto-bienestar",
+      // Pegue aquí el database_id que imprime: npx wrangler d1 create abasto-bienestar
+      "database_id": "bc2c037c-2a55-4a26-bc04-291fa9d80e3b"
+    }
   ],
+
+  // Archivos: la copia del Excel del catálogo y las fotos que se suben con admin_bienestar.py
   "kv_namespaces": [
-    { "binding": "ARCHIVOS", "id": "1a079e7e020546a3b48acc08acb5809a" }
+    {
+      "binding": "ARCHIVOS",
+      // Pegue aquí el id que imprime: npx wrangler kv namespace create ARCHIVOS
+      "id": "1a079e7e020546a3b48acc08acb5809a"
+    }
   ],
 
   "vars": {
-    // Las fotos que se suben desde el panel se publican en el Worker público, que es el que lee la app
+    // Las fotos que se suben desde el panel se publican en la dirección pública, que es la que lee la app
     "URL_PUBLICA": "https://abasto-bienestar.abasto-bienestar-servidor.workers.dev"
   }
 
-  // Secretos (npx wrangler secret put NOMBRE -c wrangler.admin.jsonc):
-  //   ACCESS_EQUIPO   dominio del equipo de Access, p. ej. «miequipo.cloudflareaccess.com»
-  //   ACCESS_AUD      «Audience (AUD) tag» de la aplicación de Access
-  //   LINK_CATALOGO   vínculo del Excel del catálogo (para «Descargar el catálogo ahora»)
+  // Las claves NO van aquí (este archivo se sube a git). Se guardan como secretos:
+  //   npx wrangler secret put ADMIN_TOKEN     clave de admin_bienestar.py
+  //   npx wrangler secret put LINK_CATALOGO   vínculo para compartir del Excel del catálogo
+  // Solo el panel (agregue -c wrangler.admin.jsonc): ACCESS_EQUIPO, ACCESS_AUD y LINK_CATALOGO
 }

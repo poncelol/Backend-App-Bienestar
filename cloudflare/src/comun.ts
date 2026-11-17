@@ -16,6 +16,8 @@ export interface Env {
   ACCESS_EQUIPO?: string;
   /** Solo en .dev.vars: "si" deja entrar al panel sin Access, y solo desde 127.0.0.1 / localhost. */
   DESARROLLO_SIN_ACCESO?: string;
+  /** Solo para probar el panel en la computadora (npm run dev:admin). */
+  PANEL_LOCAL?: string;
 }
 
 export const TIPOS = ['proveedores', 'productos', 'articulos'] as const;
