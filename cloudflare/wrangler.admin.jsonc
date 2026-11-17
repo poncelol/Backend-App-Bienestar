@@ -1,0 +1,30 @@
+// Panel web de administración (src/admin.ts + src/panel.html). Toda su dirección va protegida con Cloudflare Access.
+// Publicar: npm run deploy:admin    ·    Probar en la computadora: npm run dev:admin
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "abasto-bienestar-admin",
+  "main": "src/admin.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  // Solo la dirección *.workers.dev, que es la que protege Access; sin direcciones de vista previa
+  "workers_dev": true,
+  "preview_urls": false,
+
+  // La misma base de datos y el mismo almacén que el Worker público (wrangler.jsonc)
+  "d1_databases": [
+    { "binding": "DB", "database_name": "abasto-bienestar", "database_id": "bc2c037c-2a55-4a26-bc04-291fa9d80e3b" }
+  ],
+  "kv_namespaces": [
+    { "binding": "ARCHIVOS", "id": "1a079e7e020546a3b48acc08acb5809a" }
+  ],
+
+  "vars": {
+    // Las fotos que se suben desde el panel se publican en el Worker público, que es el que lee la app
+    "URL_PUBLICA": "https://abasto-bienestar.abasto-bienestar-servidor.workers.dev"
+  }
+
+  // Secretos (npx wrangler secret put NOMBRE -c wrangler.admin.jsonc):
+  //   ACCESS_EQUIPO   dominio del equipo de Access, p. ej. «miequipo.cloudflareaccess.com»
+  //   ACCESS_AUD      «Audience (AUD) tag» de la aplicación de Access
+  //   LINK_CATALOGO   vínculo del Excel del catálogo (para «Descargar el catálogo ahora»)
+}

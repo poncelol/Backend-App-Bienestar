@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
+    "dev:admin": "wrangler dev -c wrangler.admin.jsonc --port 8788",
     "deploy": "wrangler deploy",
+    "deploy:admin": "wrangler deploy -c wrangler.admin.jsonc",
     "tablas": "wrangler d1 execute abasto-bienestar --remote --file=schema.sql",
     "tablas:local": "wrangler d1 execute abasto-bienestar --local --file=schema.sql",
     "tipos": "tsc --noEmit"

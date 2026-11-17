@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Abasto Bienestar · Administración</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%239B2247'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='Segoe UI,sans-serif' font-weight='700'%3EAB%3C/text%3E%3C/svg%3E">
+<!-- SheetJS lee el Excel del catálogo en el navegador (el servidor gratuito no tiene CPU para hacerlo) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --guinda: #9B2247; --guinda-osc: #611232; --verde: #1E5B4F; --dorado: #A57F2C;
+    --fondo: #F6F3EE; --panel: #FFFFFF; --texto: #1F1F1F; --gris: #6B6B6B; --borde: #E2DBD0;
+    --falta: #FBE5E8; --hereda: #FFF3D6; --ok-fondo: #E3F1EC;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--fondo); color: var(--texto);
+    font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  button, input, select, textarea { font: inherit; }
+  header { background: var(--guinda); color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 16px;
+    flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 19px; margin: 0; }
+  header .sub { color: #F2D6DD; }
+  header .der { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .chip-estado { color: #F2D6DD; font-size: 13px; }
+  .chip-estado.ok::before { content: "● "; color: #9BE3C4; }
+  .chip-estado.mal::before { content: "● "; color: #FFB4B4; }
+  .btn { border: 1px solid var(--borde); background: #fff; color: var(--texto); border-radius: 8px; padding: 7px 12px;
+    cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: #C9BFB1; background: #FBF9F6; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn.prim { background: var(--guinda); border-color: var(--guinda); color: #fff; font-weight: 600; }
+  .btn.prim:hover { background: var(--guinda-osc); }
+  .btn.osc { background: var(--guinda-osc); border-color: var(--guinda-osc); color: #fff; font-weight: 600; }
+  .btn.peligro { color: var(--guinda); }
+  nav { display: flex; gap: 4px; padding: 12px 20px 0; flex-wrap: wrap; }
+  nav button { border: 1px solid var(--borde); border-bottom: none; background: #EFE9E0; padding: 8px 16px;
+    border-radius: 10px 10px 0 0; cursor: pointer; font-weight: 600; color: #444; }
+  nav button.activa { background: var(--panel); color: var(--guinda); }
+  nav .n { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 6px; border-radius: 10px;
+    background: var(--guinda); color: #fff; font-size: 12px; }
+  main { background: var(--panel); margin: 0 20px 20px; border: 1px solid var(--borde); border-radius: 0 12px 12px 12px;
+    padding: 16px; min-height: 70vh; }
+  .oculto { display: none !important; }
+
+  /* Resumen y filtros */
+  .resumen { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .resumen strong { font-size: 17px; }
+  .barra { width: 240px; max-width: 100%; height: 10px; background: #E8E2D8; border-radius: 6px; overflow: hidden; }
+  .barra > div { height: 100%; background: var(--verde); }
+  .faltan { color: var(--guinda); font-weight: 700; }
+  .faltan.cero { color: var(--verde); }
+  .filtros { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .filtros input[type=search] { padding: 7px 10px; border: 1px solid var(--borde); border-radius: 8px; width: 300px; max-width: 100%; }
+  .segmento { display: inline-flex; border: 1px solid var(--borde); border-radius: 8px; overflow: hidden; }
+  .segmento button { border: none; background: #fff; padding: 6px 12px; cursor: pointer; }
+  .segmento button.activa { background: var(--guinda); color: #fff; }
+  .mostrando { margin-left: auto; color: var(--gris); }
+
+  /* Lista + detalle */
+  .contenido { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+  .tabla { border: 1px solid var(--borde); border-radius: 10px; overflow: auto; max-height: calc(100vh - 250px); }
+  table { border-collapse: collapse; width: 100%; }
+  th { position: sticky; top: 0; background: #EFE9E0; text-align: left; padding: 8px 10px; font-size: 13px;
+    cursor: pointer; user-select: none; white-space: nowrap; }
+  td { padding: 7px 10px; border-top: 1px solid #F0EBE3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 360px; }
+  tr.falta td { background: var(--falta); }
+  tr.hereda td { background: var(--hereda); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { filter: brightness(.97); }
+  tr.sel td { background: var(--guinda) !important; color: #fff; }
+  .detalle { position: sticky; top: 70px; border: 1px solid var(--borde); border-radius: 12px; padding: 14px; background: #fff; }
+  .foto { height: 230px; border: 1px solid var(--borde); border-radius: 10px; background: #FAFAFA; display: grid;
+    place-items: center; overflow: hidden; color: var(--gris); text-align: center; position: relative; }
+  .foto img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .foto.arrastrando { outline: 3px dashed var(--guinda); outline-offset: -6px; background: #FFF6F8; }
+  .detalle h2 { font-size: 16px; margin: 10px 0 2px; }
+  .detalle .sub { color: var(--gris); font-size: 12.5px; white-space: pre-line; }
+  .insignia { display: inline-block; padding: 2px 10px; border-radius: 6px; font-weight: 700; font-size: 12.5px; margin-top: 6px; }
+  .insignia.ok { background: var(--ok-fondo); color: var(--verde); }
+  .insignia.hereda { background: var(--hereda); color: #7A5C1E; }
+  .insignia.falta { background: var(--falta); color: var(--guinda); }
+  .fila { display: flex; gap: 6px; margin-top: 8px; }
+  .fila input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid var(--borde); border-radius: 8px; }
+  .caja { border: 1px solid var(--borde); border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
+  .caja h3 { margin: 0 0 4px; font-size: 13.5px; color: var(--guinda-osc); }
+  .ayuda { color: var(--gris); font-size: 12.5px; margin: 6px 0 0; }
+  .pegar { border: 2px dashed #D8CDBE; border-radius: 10px; padding: 10px; text-align: center; color: var(--gris);
+    margin-top: 8px; font-size: 13px; }
+  label.check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin-top: 8px; }
+  .vacio { text-align: center; color: var(--gris); padding: 50px 10px; }
+
+  /* Regiones y servidor */
+  .seccion { max-width: 1100px; }
+  .seccion h2 { font-size: 17px; margin: 0 0 6px; }
+  .regiones input, .regiones textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--borde); border-radius: 6px; }
+  .regiones textarea { resize: vertical; min-height: 36px; }
+  .regiones td { white-space: normal; vertical-align: top; max-width: none; }
+  .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 12px 0; }
+  .tarjeta { border: 1px solid var(--borde); border-radius: 10px; padding: 12px; }
+  .tarjeta .et { color: var(--gris); font-size: 12.5px; }
+  .tarjeta .v { font-size: 16px; font-weight: 700; }
+  .error { color: var(--guinda); font-weight: 600; }
+
+  .avisos { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 20; }
+  .aviso { background: #1F1F1F; color: #fff; padding: 10px 14px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    max-width: 380px; animation: entra .2s ease-out; }
+  .aviso.ok { background: var(--verde); }
+  .aviso.mal { background: var(--guinda); }
+  @keyframes entra { from { transform: translateY(8px); opacity: 0; } }
+  .cargando { padding: 60px; text-align: center; color: var(--gris); }
+
+  @media (max-width: 900px) {
+    header { position: static; }
+    header, nav { padding-left: 16px; padding-right: 16px; }
+    main { margin: 0 16px 16px; padding: 12px; }
+    /* minmax(0, …): la tabla ancha se desplaza dentro de su caja en vez de ensanchar la página */
+    .contenido { grid-template-columns: minmax(0, 1fr); }
+    td { max-width: 220px; }
+    .detalle { position: static; }
+    .tabla { max-height: 50vh; }
+    .mostrando { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Abasto Bienestar</h1><span class="sub">Administración</span>
+  <div class="der">
+    <span id="estado" class="chip-estado">Conectando…</span>
+    <span id="correo" class="sub"></span>
+    <button class="btn osc" id="recargar">⟳ Recargar</button>
+  </div>
+</header>
+<nav id="pestanas"></nav>
+<main>
+  <div id="cargando" class="cargando">Cargando el catálogo y las imágenes…</div>
+
+  <section id="vista-imagenes" class="oculto">
+    <div class="resumen">
+      <strong id="r-texto"></strong>
+      <div class="barra"><div id="r-barra"></div></div>
+      <span id="r-faltan" class="faltan"></span>
+    </div>
+    <div class="filtros">
+      <input type="search" id="buscar" placeholder="Buscar por nombre, clave, marca…">
+      <div class="segmento" id="filtro">
+        <button data-f="todos" class="activa">Todos</button><button data-f="falta">Sin imagen</button><button data-f="con">Con imagen</button>
+      </div>
+      <span class="mostrando" id="mostrando"></span>
+    </div>
+    <div class="contenido">
+      <div class="tabla"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+      <aside class="detalle" id="detalle">
+        <div class="foto" id="foto">Elija un renglón de la lista</div>
+        <h2 id="d-nombre"></h2>
+        <div class="sub" id="d-sub"></div>
+        <span class="insignia oculto" id="d-insignia"></span>
+        <div class="fila">
+          <input id="d-url" readonly placeholder="Sin imagen">
+          <button class="btn" id="d-copiar">Copiar</button>
+          <button class="btn" id="d-abrir">Abrir</button>
+        </div>
+
+        <div class="caja">
+          <h3>🔎 Buscar la foto</h3>
+          <div class="fila"><input id="d-consulta"></div>
+          <div class="fila">
+            <button class="btn prim" id="b-google">Buscar en Google</button>
+            <button class="btn" id="b-bing">Buscar en Bing</button>
+          </div>
+          <p class="ayuda">En la pestaña que se abre, clic derecho sobre la foto → <b>Copiar dirección de imagen</b> (o
+            <b>Copiar imagen</b>) y regrese aquí a pegarla con <b>Ctrl+V</b>.</p>
+        </div>
+
+        <div class="caja">
+          <h3>🔗 Agregar a mano</h3>
+          <div class="fila">
+            <input id="d-nueva" placeholder="Pegue el vínculo o la imagen (Ctrl+V)">
+            <button class="btn prim" id="d-guardar">Guardar</button>
+          </div>
+          <div class="pegar">Arrastre una foto aquí o a la vista previa · o
+            <button class="btn" id="d-archivo">📁 Elegir archivo</button>
+            <input type="file" id="archivo" accept="image/*" class="oculto">
+          </div>
+          <label class="check"><input type="checkbox" id="auto" checked> Después de guardar, pasar al siguiente sin imagen</label>
+        </div>
+
+        <div class="fila" style="margin-top:12px;flex-wrap:wrap">
+          <button class="btn peligro" id="d-quitar">🗑 Quitar</button>
+          <button class="btn" id="d-deshacer">↩ Deshacer</button>
+          <button class="btn" id="d-siguiente" style="margin-left:auto">Siguiente sin imagen →</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="vista-regiones" class="seccion oculto">
+    <h2>🗺️ Gerencias regionales</h2>
+    <p class="ayuda">Nombre, clave y unidades operativas (separadas por comas). Las siglas y los estados del mapa son fijos en la app.</p>
+    <div class="tabla" style="max-height:none;margin-top:10px">
+      <table class="regiones"><thead><tr><th>Sigla</th><th>Nombre</th><th style="width:90px">Clave</th><th>Unidades operativas</th></tr></thead>
+        <tbody id="t-regiones"></tbody></table>
+    </div>
+    <div class="fila"><button class="btn prim" id="g-regiones">💾 Guardar regiones</button>
+      <span class="ayuda" id="reg-origen"></span></div>
+  </section>
+
+  <section id="vista-servidor" class="seccion oculto">
+    <h2>⚙️ Servidor</h2>
+    <div class="tarjetas" id="tarjetas"></div>
+    <div class="fila">
+      <button class="btn prim" id="s-sincronizar">🔄 Descargar el catálogo ahora</button>
+    </div>
+    <p class="ayuda">El servidor descarga solo el Excel del catálogo cada 15 minutos; este botón sirve para no esperar.</p>
+
+    <div class="caja">
+      <h3>Excel del catálogo</h3>
+      <div class="ayuda">Vínculo actual: <span id="s-vinculo"></span></div>
+      <div class="fila"><input id="s-link" placeholder="Nuevo vínculo para compartir (https://….sharepoint.com/:x:/g/…)">
+        <button class="btn" id="s-cambiar">Probar y guardar</button></div>
+      <p class="ayuda">Se prueba antes de guardarlo. Debe estar compartido como «Cualquier persona con el vínculo puede ver».</p>
+    </div>
+
+    <div class="caja">
+      <h3>Carga completa desde el Excel de imágenes</h3>
+      <p class="ayuda">Sube de golpe la columna IMAGEN de las hojas PROVEEDORES, PRODUCTOS y ARTICULOS. La base de datos es la que manda.</p>
+      <div class="fila"><input type="file" id="s-excel" accept=".xlsx"></div>
+      <label class="check"><input type="checkbox" id="s-reemplazar"> Además, borrar las fotos de claves que no estén en el Excel</label>
+      <div class="fila"><button class="btn" id="s-subir" disabled>⬆ Subir imágenes del Excel</button>
+        <span class="ayuda" id="s-excel-info"></span></div>
+    </div>
+  </section>
+</main>
+<div class="avisos" id="avisos"></div>
+
+<script>
+'use strict';
+const TIPOS = ['articulos', 'productos', 'proveedores'];
+const TITULO = { articulos: '📦 Artículos', productos: '🏷️ Productos', proveedores: '🏭 Proveedores' };
+const PLURAL = { articulos: 'artículos', productos: 'productos', proveedores: 'proveedores' };
+const SINGULAR = { articulos: 'artículo', productos: 'producto', proveedores: 'proveedor' };
+const LLAVE = { articulos: 'ART.', productos: 'PROD.', proveedores: 'CVE' };
+const COLUMNAS = {
+  articulos: [['estado', 'Estado'], ['clave', 'ART.'], ['nombre', 'Artículo'], ['marca', 'Marca'], ['proveedor', 'Proveedor']],
+  productos: [['estado', 'Estado'], ['clave', 'PROD.'], ['nombre', 'Producto'], ['articulos', 'Artículos']],
+  proveedores: [['estado', 'Estado'], ['clave', 'CVE'], ['nombre', 'Proveedor'], ['articulos', 'Artículos']],
+};
+const ESTADO_TEXTO = { ok: '✓ Con foto', hereda: '◐ De un artículo', falta: '✗ Falta' };
+const REGIONES_APP = [
+  ['NOE', 'Noroeste', 41, ['Sinaloa', 'Baja California', 'Baja California Sur', 'Sonora']],
+  ['NOR', 'Norte', 42, ['Chihuahua', 'Durango', 'Coahuila']],
+  ['NC', 'Norte Centro', 43, ['Zacatecas', 'San Luis Potosí', 'Aguascalientes', 'Nuevo León']],
+  ['GLF', 'Golfo', 44, ['Oficina Central Xalapa', 'Acayucan', 'Orizaba', 'Poza Rica', 'Tamaulipas']],
+  ['OCC', 'Occidente', 45, ['Jalisco', 'Nayarit', 'Colima']],
+  ['CEN', 'Centro', 46, ['Hidalgo', 'Querétaro', 'Guanajuato']],
+  ['OAX', 'Oaxaca', 47, ['Oaxaca', 'Istmo', 'Mixteca']],
+  ['MET', 'Metropolitana', 48, ['Estado de México', 'Morelos']],
+  ['PEN', 'Peninsular', 49, ['Yucatán', 'Campeche', 'Quintana Roo']],
+  ['STE', 'Sureste', 50, ['Tabasco', 'Tuxtla Gutiérrez', 'Tapachula']],
+  ['PSR', 'Pacífico Sur', 51, ['Michoacán', 'Guerrero']],
+  ['PUE', 'Puebla', 52, ['Puebla', 'Tlaxcala']],
+].map(([sigla, nombre, clave, unidades]) => ({ sigla, nombre, clave, unidades }));
+
+const S = {
+  pestana: 'articulos',
+  catalogo: { articulos: [], productos: [], proveedores: [] },
+  porClave: { articulos: {}, productos: {}, proveedores: {} },
+  imagenes: { articulos: {}, productos: {}, proveedores: {} },
+  filtro: { articulos: 'todos', productos: 'todos', proveedores: 'todos' },
+  busqueda: { articulos: '', productos: '', proveedores: '' },
+  orden: { articulos: ['estado', false], productos: ['estado', false], proveedores: ['estado', false] },
+  sel: { articulos: null, productos: null, proveedores: null },
+  historial: [],
+  excelImagenes: null,
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const sinAcentos = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const hora = (iso) => (iso ? new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+
+function aviso(texto, tipo = '') {
+  const d = document.createElement('div');
+  d.className = `aviso ${tipo}`;
+  d.textContent = texto;
+  $('avisos').append(d);
+  setTimeout(() => d.remove(), tipo === 'mal' ? 7000 : 3500);
+}
+
+async function api(ruta, opciones = {}) {
+  const metodo = opciones.method || 'GET';
+  const encabezados = { ...(opciones.headers || {}) };
+  if (metodo !== 'GET') encabezados['X-Panel'] = '1';
+  if (opciones.json !== undefined) {
+    encabezados['Content-Type'] = 'application/json';
+    opciones.body = JSON.stringify(opciones.json);
+  }
+  const r = await fetch(ruta, { method: metodo, headers: encabezados, body: opciones.body, credentials: 'same-origin' });
+  if (r.status === 401) {
+    aviso('La sesión venció: vuelva a entrar.', 'mal');
+    setTimeout(() => location.reload(), 1500);
+    throw new Error('Sesión vencida');
+  }
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { msg = (await r.json()).error || msg; } catch (_) { /* sin JSON */ }
+    throw new Error(msg);
+  }
+  return opciones.binario ? r.arrayBuffer() : r.json();
+}
+
+// ── Catálogo (mismas reglas que la app y admin_bienestar.py)
+const norm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
+function clave(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'number' && Number.isInteger(v)) return String(v);
+  const s = String(v).trim().replace(/\.0$/, '');
+  return ['NAN', 'NONE', '<NA>'].includes(s.toUpperCase()) ? '' : s;
+}
+
+function leerCatalogo(contenido) {
+  const libro = XLSX.read(new Uint8Array(contenido), { type: 'array' });
+  const hoja = libro.SheetNames.includes('VIGENTES') ? 'VIGENTES' : libro.SheetNames[0];
+  const filas = XLSX.utils.sheet_to_json(libro.Sheets[hoja], { header: 1, raw: true, defval: null });
+  const iEnc = filas.slice(0, 30).findIndex((f) => f.some((c) => ['NEGOCIACION', 'CVE'].includes(norm(c))));
+  if (iEnc < 0) throw new Error('No encontré la fila de encabezados del catálogo.');
+  const col = {};
+  filas[iEnc].forEach((c, i) => { const n = norm(c); if (n && col[n] === undefined) col[n] = i; });
+  const val = (f, n) => (col[n] === undefined ? null : f[col[n]]);
+  const arts = new Map(), prods = new Map(), provs = new Map();
+  for (const f of filas.slice(iEnc + 1)) {
+    const art = clave(val(f, 'ART.'));
+    if (!art) continue;
+    const cve = clave(val(f, 'CVE'));
+    const proveedor = norm(val(f, 'PROVEEDOR'));
+    const producto = norm(val(f, 'PRODUCTOS')) || 'SIN CLASIFICAR';
+    const prod = clave(val(f, 'PROD.')) || producto;
+    if (!arts.has(art)) {
+      arts.set(art, { clave: art, nombre: norm(val(f, 'ARTICULOS')) || 'SIN NOMBRE', marca: norm(val(f, 'MARCA')),
+        proveedor, producto, prod, barras: clave(val(f, 'CODIGO BARRAS')) });
+    }
+    const p = prods.get(prod) || { clave: prod, nombres: new Map(), arts: new Set() };
+    p.nombres.set(producto, (p.nombres.get(producto) || 0) + 1);
+    p.arts.add(art);
+    prods.set(prod, p);
+    if (cve) {
+      const v = provs.get(cve) || { clave: cve, nombre: proveedor, arts: new Set() };
+      v.arts.add(art);
+      provs.set(cve, v);
+    }
+  }
+  return {
+    articulos: [...arts.values()],
+    productos: [...prods.values()].map((p) => ({ clave: p.clave, articulos: p.arts.size,
+      nombre: [...p.nombres].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0][0] })),
+    proveedores: [...provs.values()].map((v) => ({ clave: v.clave, nombre: v.nombre, articulos: v.arts.size })),
+  };
+}
+
+// Vínculo de la columna IMAGEN -> URL que se puede mostrar (como urlImagen en la app)
+function urlVisible(link) {
+  link = String(link || '').trim();
+  const m = link.match(/^(https:\/\/[^/]+\.sharepoint\.com)\/:[a-z]:\/[a-z]\/(personal|sites)\/([^/]+)\/([A-Za-z0-9_-]+)/i);
+  if (m) return `${m[1]}/${m[2]}/${m[3]}/_layouts/15/download.aspx?share=${m[4]}`;
+  if (/1drv\.ms|onedrive\.live\.com/i.test(link)) {
+    return `https://api.onedrive.com/v1.0/shares/u!${btoa(link).replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-')}/root/content`;
+  }
+  return link;
+}
+
+// ── Estado de cada renglón
+let fotoDeProducto = {};
+function recalcularHerencia() {
+  fotoDeProducto = {};
+  for (const a of S.catalogo.articulos) {
+    const u = S.imagenes.articulos[a.clave];
+    if (u && !fotoDeProducto[a.prod]) fotoDeProducto[a.prod] = u;
+  }
+}
+function estadoDe(tipo, it) {
+  const u = S.imagenes[tipo][it.clave];
+  if (u) return ['ok', u];
+  if (tipo === 'productos' && fotoDeProducto[it.clave]) return ['hereda', fotoDeProducto[it.clave]];
+  return ['falta', ''];
+}
+const faltan = (tipo) => S.catalogo[tipo].filter((it) => estadoDe(tipo, it)[0] === 'falta').length;
+
+// ── Pestañas
+function pintarPestanas() {
+  const nombres = { ...TITULO, regiones: '🗺️ Regiones', servidor: '⚙️ Servidor' };
+  $('pestanas').innerHTML = Object.entries(nombres).map(([k, t]) => {
+    const n = TIPOS.includes(k) ? faltan(k) : 0;
+    return `<button data-p="${k}" class="${S.pestana === k ? 'activa' : ''}">${t}${n ? `<span class="n">${n}</span>` : ''}</button>`;
+  }).join('');
+}
+$('pestanas').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-p]');
+  if (b) abrirPestana(b.dataset.p);
+});
+function abrirPestana(p) {
+  S.pestana = p;
+  pintarPestanas();
+  $('vista-imagenes').classList.toggle('oculto', !TIPOS.includes(p));
+  $('vista-regiones').classList.toggle('oculto', p !== 'regiones');
+  $('vista-servidor').classList.toggle('oculto', p !== 'servidor');
+  if (TIPOS.includes(p)) {
+    $('buscar').value = S.busqueda[p];
+    for (const b of $('filtro').children) b.classList.toggle('activa', b.dataset.f === S.filtro[p]);
+    pintarTabla();
+    mostrarDetalle();
+  }
+  if (p === 'regiones') cargarRegiones();
+  if (p === 'servidor') cargarEstado();
+}
+
+// ── Lista
+function valores(tipo, it) {
+  const e = estadoDe(tipo, it)[0];
+  return tipo === 'articulos'
+    ? { estado: e, clave: it.clave, nombre: it.nombre, marca: it.marca, proveedor: it.proveedor }
+    : { estado: e, clave: it.clave, nombre: it.nombre, articulos: it.articulos };
+}
+
+function filasVisibles(tipo) {
+  const q = sinAcentos(S.busqueda[tipo].trim());
+  const f = S.filtro[tipo];
+  const [col, desc] = S.orden[tipo];
+  const prioridad = { falta: 0, hereda: 1, ok: 2 };
+  const filas = S.catalogo[tipo].map((it) => ({ it, v: valores(tipo, it) })).filter(({ it, v }) => {
+    if (f === 'falta' && v.estado !== 'falta') return false;
+    if (f === 'con' && v.estado === 'falta') return false;
+    return !q || sinAcentos(Object.values(v).join(' ')).includes(q);
+  });
+  const llave = ({ v }) => (col === 'estado' ? [prioridad[v.estado], v.nombre] : [/^\d+$/.test(v[col]) ? Number(v[col]) : String(v[col])]);
+  filas.sort((a, b) => {
+    const x = llave(a), y = llave(b);
+    for (let i = 0; i < x.length; i++) {
+      if (x[i] < y[i]) return desc ? 1 : -1;
+      if (x[i] > y[i]) return desc ? -1 : 1;
+    }
+    return 0;
+  });
+  return filas;
+}
+
+function pintarTabla() {
+  const tipo = S.pestana;
+  const [col, desc] = S.orden[tipo];
+  $('thead').innerHTML = '<tr>' + COLUMNAS[tipo].map(([c, t]) =>
+    `<th data-c="${c}">${t}${c === col ? (desc ? ' ▾' : ' ▴') : ''}</th>`).join('') + '</tr>';
+  const filas = filasVisibles(tipo);
+  $('tbody').innerHTML = filas.length ? filas.map(({ it, v }) =>
+    `<tr data-k="${esc(it.clave)}" class="${v.estado}${S.sel[tipo] === it.clave ? ' sel' : ''}">` +
+    COLUMNAS[tipo].map(([c]) => `<td title="${esc(c === 'estado' ? '' : v[c])}">${esc(c === 'estado' ? ESTADO_TEXTO[v.estado] : v[c])}</td>`).join('') +
+    '</tr>').join('') : `<tr><td colspan="9" class="vacio">Nada que mostrar con este filtro.</td></tr>`;
+  $('mostrando').textContent = `Mostrando ${filas.length.toLocaleString('es-MX')}`;
+  pintarResumen();
+}
+
+function pintarResumen() {
+  const tipo = S.pestana;
+  const total = S.catalogo[tipo].length;
+  const f = faltan(tipo);
+  $('r-texto').textContent = `${(total - f).toLocaleString('es-MX')} de ${total.toLocaleString('es-MX')} ${PLURAL[tipo]} con imagen`;
+  $('r-barra').style.width = `${total ? (100 * (total - f)) / total : 0}%`;
+  $('r-faltan').textContent = f ? `✗ ${f} sin imagen` : '✓ Todos tienen imagen';
+  $('r-faltan').classList.toggle('cero', !f);
+}
+
+function actualizarFila(tipo, k) {
+  if (tipo === 'articulos') recalcularHerencia();
+  pintarPestanas();
+  if (S.pestana !== tipo) return;
+  const tr = $('tbody').querySelector(`tr[data-k="${CSS.escape(k)}"]`);
+  const it = S.porClave[tipo][k];
+  if (tr && it) {
+    const v = valores(tipo, it);
+    tr.className = `${v.estado}${S.sel[tipo] === k ? ' sel' : ''}`;
+    tr.firstElementChild.textContent = ESTADO_TEXTO[v.estado];
+  }
+  pintarResumen();
+  if (S.sel[tipo] === k) mostrarDetalle();
+}
+
+$('thead').addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-c]');
+  if (!th) return;
+  const o = S.orden[S.pestana];
+  S.orden[S.pestana] = o[0] === th.dataset.c ? [o[0], !o[1]] : [th.dataset.c, false];
+  pintarTabla();
+});
+$('tbody').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-k]');
+  if (tr) seleccionar(tr.dataset.k);
+});
+$('buscar').addEventListener('input', (e) => { S.busqueda[S.pestana] = e.target.value; pintarTabla(); });
+$('filtro').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-f]');
+  if (!b) return;
+  S.filtro[S.pestana] = b.dataset.f;
+  for (const x of $('filtro').children) x.classList.toggle('activa', x === b);
+  pintarTabla();
+});
+
+function seleccionar(k, desplazar = false) {
+  const tipo = S.pestana;
+  const antes = $('tbody').querySelector('tr.sel');
+  if (antes) antes.classList.remove('sel');
+  S.sel[tipo] = k;
+  const tr = $('tbody').querySelector(`tr[data-k="${CSS.escape(k)}"]`);
+  if (tr) {
+    tr.classList.add('sel');
+    if (desplazar) tr.scrollIntoView({ block: 'center' });
+  }
+  $('d-nueva').value = '';
+  $('d-consulta').value = consulta(tipo, S.porClave[tipo][k]);
+  mostrarDetalle();
+  if (window.innerWidth < 900) $('detalle').scrollIntoView({ behavior: 'smooth' });
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!TIPOS.includes(S.pestana) || ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const filas = [...$('tbody').querySelectorAll('tr[data-k]')];
+  const i = filas.findIndex((tr) => tr.dataset.k === S.sel[S.pestana]);
+  const j = Math.max(0, Math.min(filas.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)));
+  if (filas[j]) { e.preventDefault(); seleccionar(filas[j].dataset.k, true); }
+});
+
+function siguienteSinImagen() {
+  const tipo = S.pestana;
+  const filas = [...$('tbody').querySelectorAll('tr[data-k]')].map((tr) => tr.dataset.k);
+  const i = filas.indexOf(S.sel[tipo]);
+  const orden = [...filas.slice(i + 1), ...filas.slice(0, Math.max(i, 0))];
+  const k = orden.find((x) => estadoDe(tipo, S.porClave[tipo][x])[0] === 'falta');
+  if (k) seleccionar(k, true);
+  else aviso(`🎉 Ya no quedan ${PLURAL[tipo]} sin imagen en la lista.`, 'ok');
+}
+
+// ── Detalle
+function consulta(tipo, it) {
+  if (!it) return '';
+  if (tipo === 'proveedores') {
+    return it.nombre.replace(/[,\s]+(S\.?\s?A\.?\s*(P\.?\s?I\.?\s*)?DE\s*C\.?\s?V\.?|S\.?\s?DE\s*R\.?\s?L\.?.*)$/i, '').replace(/^[\s,.]+|[\s,.]+$/g, '') + ' logo';
+  }
+  let q = it.nombre;
+  if (tipo === 'articulos') {
+    if (it.marca && !q.toLowerCase().includes(it.marca.toLowerCase())) q += ' ' + it.marca;
+    if (/^\d{8,}$/.test(it.barras) && !/^0+$/.test(it.barras)) q += ' ' + it.barras;
+  }
+  return q;
+}
+
+function mostrarDetalle() {
+  const tipo = S.pestana;
+  const it = S.porClave[tipo][S.sel[tipo]];
+  const foto = $('foto');
+  if (!it) {
+    foto.textContent = 'Elija un renglón de la lista';
+    for (const id of ['d-nombre', 'd-sub']) $(id).textContent = '';
+    $('d-insignia').classList.add('oculto');
+    $('d-url').value = '';
+    return;
+  }
+  const [estado, url] = estadoDe(tipo, it);
+  $('d-nombre').textContent = it.nombre;
+  let sub = `${LLAVE[tipo]} ${it.clave}`;
+  if (tipo === 'articulos') {
+    sub += ` · ${it.marca || 'sin marca'} · ${it.producto.charAt(0) + it.producto.slice(1).toLowerCase()}\n${it.proveedor}`;
+    if (it.barras && !/^0+$/.test(it.barras)) sub += `\nCódigo de barras ${it.barras}`;
+  } else {
+    sub += ` · ${it.articulos} artículo${it.articulos === 1 ? '' : 's'}`;
+  }
+  $('d-sub').textContent = sub;
+  const ins = $('d-insignia');
+  ins.className = `insignia ${estado}`;
+  ins.textContent = ESTADO_TEXTO[estado];
+  $('d-url').value = url;
+  if (!url) {
+    foto.innerHTML = 'Sin imagen<br><br>Búsquela, pegue un vínculo o arrastre una foto aquí';
+  } else {
+    const img = new Image();
+    img.alt = it.nombre;
+    img.referrerPolicy = 'no-referrer';
+    img.onerror = () => { if (S.sel[tipo] === it.clave) foto.innerHTML = 'No se pudo mostrar la foto<br>Revise el vínculo con «Abrir»'; };
+    img.src = urlVisible(url);
+    foto.replaceChildren(img);
+  }
+}
+
+$('d-copiar').onclick = () => { if ($('d-url').value) navigator.clipboard.writeText($('d-url').value).then(() => aviso('Vínculo copiado')); };
+$('d-abrir').onclick = () => { if ($('d-url').value) window.open(urlVisible($('d-url').value), '_blank', 'noopener'); };
+$('b-google').onclick = () => buscarEn('https://www.google.com/search?tbm=isch&hl=es&q=');
+$('b-bing').onclick = () => buscarEn('https://www.bing.com/images/search?q=');
+function buscarEn(base) {
+  const q = $('d-consulta').value.trim();
+  if (!actual()) return aviso('Primero elija un renglón de la lista.');
+  if (q) window.open(base + encodeURIComponent(q), '_blank', 'noopener');
+}
+$('d-siguiente').onclick = siguienteSinImagen;
+
+// ── Guardar
+function actual() {
+  const tipo = S.pestana;
+  return TIPOS.includes(tipo) && S.sel[tipo] ? { tipo, it: S.porClave[tipo][S.sel[tipo]] } : null;
+}
+
+async function guardar(tipo, k, url, { deshacer = true, avanzar = false } = {}) {
+  const anterior = S.imagenes[tipo][k] || '';
+  await api('/api/imagenes', { method: 'PUT', json: { [tipo]: { [k]: url } } });
+  if (url) S.imagenes[tipo][k] = url; else delete S.imagenes[tipo][k];
+  if (deshacer) S.historial.push([tipo, k, anterior]);
+  actualizarFila(tipo, k);
+  aviso(`${url ? '✓ Guardada' : '✓ Quitada'} la imagen de ${SINGULAR[tipo]} ${k}`, 'ok');
+  if (avanzar && $('auto').checked && S.pestana === tipo && S.sel[tipo] === k) siguienteSinImagen();
+}
+
+async function guardarVinculo(url) {
+  const a = actual();
+  if (!a) return aviso('Primero elija un renglón de la lista.');
+  url = url.trim();
+  if (url.startsWith('data:image/')) return subirArchivo(await (await fetch(url)).blob());
+  if (!/^https?:\/\//i.test(url)) return aviso('Pegue un vínculo que empiece con http:// o https://', 'mal');
+  try {
+    await guardar(a.tipo, a.it.clave, url, { avanzar: true });
+    $('d-nueva').value = '';
+  } catch (e) { aviso(e.message, 'mal'); }
+}
+$('d-guardar').onclick = () => guardarVinculo($('d-nueva').value);
+$('d-nueva').addEventListener('keydown', (e) => { if (e.key === 'Enter') guardarVinculo($('d-nueva').value); });
+
+$('d-quitar').onclick = async () => {
+  const a = actual();
+  if (!a || !S.imagenes[a.tipo][a.it.clave]) return;
+  if (!confirm(`¿Quitar la imagen de «${a.it.nombre}»?`)) return;
+  try { await guardar(a.tipo, a.it.clave, ''); } catch (e) { aviso(e.message, 'mal'); }
+};
+$('d-deshacer').onclick = async () => {
+  const ultimo = S.historial.pop();
+  if (!ultimo) return aviso('No hay cambios que deshacer.');
+  try { await guardar(...ultimo, { deshacer: false }); } catch (e) { S.historial.push(ultimo); aviso(e.message, 'mal'); }
+};
+
+// ── Fotos: archivo, arrastrar o pegar
+async function prepararFoto(archivo) {
+  const bmp = await createImageBitmap(archivo);
+  const escala = Math.min(1, 1200 / Math.max(bmp.width, bmp.height));
+  const lienzo = document.createElement('canvas');
+  lienzo.width = Math.round(bmp.width * escala);
+  lienzo.height = Math.round(bmp.height * escala);
+  lienzo.getContext('2d').drawImage(bmp, 0, 0, lienzo.width, lienzo.height);
+  const aBlob = (tipo) => new Promise((r) => lienzo.toBlob(r, tipo, 0.85));
+  // PNG si la original puede tener transparencia (logotipos); si pesa demasiado, JPEG
+  let blob = /png|webp|gif|svg/.test(archivo.type) ? await aBlob('image/png') : null;
+  if (!blob || blob.size > 4.5 * 1024 * 1024) blob = await aBlob('image/jpeg');
+  return blob;
+}
+
+async function subirArchivo(archivo) {
+  const a = actual();
+  if (!a) return aviso('Primero elija un renglón de la lista.');
+  if (!archivo || !archivo.type.startsWith('image/')) return aviso('Eso no es una imagen.', 'mal');
+  try {
+    aviso('Subiendo la foto…');
+    const blob = await prepararFoto(archivo);
+    const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+    const nombre = `${a.tipo}-${a.it.clave}.${ext}`.replace(/[^A-Za-z0-9._-]/g, '_');
+    const r = await api(`/api/fotos/${nombre}`, { method: 'PUT', body: blob, headers: { 'Content-Type': blob.type } });
+    await guardar(a.tipo, a.it.clave, r.url, { avanzar: true });
+  } catch (e) { aviso(`No se pudo subir: ${e.message}`, 'mal'); }
+}
+$('d-archivo').onclick = () => $('archivo').click();
+$('archivo').onchange = (e) => { if (e.target.files[0]) subirArchivo(e.target.files[0]); e.target.value = ''; };
+
+for (const zona of [$('foto'), document.querySelector('.pegar')]) {
+  zona.addEventListener('dragover', (e) => { e.preventDefault(); $('foto').classList.add('arrastrando'); });
+  zona.addEventListener('dragleave', () => $('foto').classList.remove('arrastrando'));
+  zona.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    $('foto').classList.remove('arrastrando');
+    const archivo = [...e.dataTransfer.files].find((f) => f.type.startsWith('image/'));
+    if (archivo) return subirArchivo(archivo);
+    const texto = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+    if (texto) guardarVinculo(texto.split('\n')[0]);
+  });
+}
+
+// Ctrl+V: en el campo «Agregar a mano» o en cualquier parte que no sea otro campo de texto
+document.addEventListener('paste', (e) => {
+  if (!actual()) return;
+  const destino = document.activeElement;
+  const enOtroCampo = ['INPUT', 'TEXTAREA'].includes(destino.tagName) && destino.id !== 'd-nueva';
+  if (enOtroCampo) return;
+  const archivo = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith('image/'));
+  if (archivo) { e.preventDefault(); subirArchivo(archivo); return; }
+  const texto = (e.clipboardData?.getData('text') || '').trim();
+  if (texto.startsWith('data:image/')) { e.preventDefault(); guardarVinculo(texto); return; }
+  if (destino.id !== 'd-nueva' && /^https?:\/\//i.test(texto)) { e.preventDefault(); guardarVinculo(texto); }
+});
+
+// ── Regiones
+async function cargarRegiones() {
+  try {
+    let lista = await api('/api/regiones');
+    $('reg-origen').textContent = lista.length ? '' : 'El servidor aún no tiene regiones: se muestran las de la app.';
+    if (!lista.length) lista = REGIONES_APP;
+    $('t-regiones').innerHTML = lista.map((r) => `<tr data-s="${esc(r.sigla)}">
+      <td><b>${esc(r.sigla)}</b></td>
+      <td><input value="${esc(r.nombre)}" data-c="nombre"></td>
+      <td><input type="number" value="${esc(r.clave)}" data-c="clave"></td>
+      <td><textarea data-c="unidades" rows="1">${esc(r.unidades.join(', '))}</textarea></td></tr>`).join('');
+  } catch (e) { aviso(e.message, 'mal'); }
+}
+$('g-regiones').onclick = async () => {
+  const regiones = [...$('t-regiones').querySelectorAll('tr')].map((tr) => ({
+    sigla: tr.dataset.s,
+    nombre: tr.querySelector('[data-c=nombre]').value.trim(),
+    clave: Number(tr.querySelector('[data-c=clave]').value),
+    unidades: tr.querySelector('[data-c=unidades]').value.split(/[,;·\n]/).map((u) => u.trim()).filter(Boolean),
+  }));
+  try {
+    const r = await api('/api/regiones', { method: 'PUT', json: regiones });
+    aviso(`✓ ${r.regiones} regiones guardadas`, 'ok');
+    $('reg-origen').textContent = '';
+  } catch (e) { aviso(e.message, 'mal'); }
+};
+
+// ── Servidor
+async function cargarEstado() {
+  try {
+    const e = await api('/api/estado');
+    const c = e.catalogo;
+    $('tarjetas').innerHTML = [
+      ['Catálogo actualizado', hora(c.actualizado)],
+      ['Última revisión', hora(c.revisado)],
+      ['Tamaño del Excel', `${Math.round(c.bytes / 1024)} KB`],
+      ['Imágenes', `${e.imagenes.articulos} art. · ${e.imagenes.productos} prod. · ${e.imagenes.proveedores} prov.`],
+      ['Regiones', e.regiones || 'las de la app'],
+    ].map(([et, v]) => `<div class="tarjeta"><div class="et">${et}</div><div class="v">${esc(v)}</div></div>`).join('') +
+      (c.error ? `<div class="tarjeta"><div class="et">Último error</div><div class="error">${esc(c.error)}</div></div>` : '');
+    $('s-vinculo').textContent = c.vinculo || '(falta)';
+    pintarConexion(e);
+  } catch (err) { aviso(err.message, 'mal'); }
+}
+function pintarConexion(e) {
+  const c = e.catalogo;
+  $('estado').textContent = `Conectado · catálogo del ${hora(c.actualizado)}${c.error ? ' · ⚠ error' : ''}`;
+  $('estado').className = `chip-estado ${c.error ? 'mal' : 'ok'}`;
+}
+$('s-sincronizar').onclick = async (ev) => {
+  ev.target.disabled = true;
+  try {
+    const r = await api('/api/sincronizar', { method: 'POST' });
+    aviso(`✓ Catálogo descargado (${Math.round(r.bytes / 1024)} KB)`, 'ok');
+    await cargarTodo();
+    cargarEstado();
+  } catch (e) { aviso(e.message, 'mal'); } finally { ev.target.disabled = false; }
+};
+$('s-cambiar').onclick = async () => {
+  const link = $('s-link').value.trim();
+  if (!link) return;
+  try {
+    const r = await api('/api/config', { method: 'PUT', json: { link_catalogo: link } });
+    aviso(`✓ Vínculo cambiado; Excel descargado (${Math.round(r.bytes / 1024)} KB)`, 'ok');
+    $('s-link').value = '';
+    await cargarTodo();
+    cargarEstado();
+  } catch (e) { aviso(e.message, 'mal'); }
+};
+$('s-excel').onchange = async (e) => {
+  const archivo = e.target.files[0];
+  S.excelImagenes = null;
+  $('s-subir').disabled = true;
+  if (!archivo) return;
+  try {
+    const libro = XLSX.read(new Uint8Array(await archivo.arrayBuffer()), { type: 'array' });
+    const hojas = { PROVEEDORES: ['proveedores', 'CVE'], PRODUCTOS: ['productos', 'PROD.'], ARTICULOS: ['articulos', 'ART.'] };
+    const mapas = {};
+    for (const [hoja, [tipo, llave]] of Object.entries(hojas)) {
+      if (!libro.Sheets[hoja]) continue;
+      mapas[tipo] = {};
+      for (const r of XLSX.utils.sheet_to_json(libro.Sheets[hoja], { defval: '' })) {
+        const k = clave(r[llave]);
+        if (k) mapas[tipo][k] = String(r.IMAGEN || '').trim();
+      }
+    }
+    if (!Object.keys(mapas).length) throw new Error('El Excel no tiene las hojas PROVEEDORES, PRODUCTOS o ARTICULOS.');
+    S.excelImagenes = mapas;
+    $('s-excel-info').textContent = Object.entries(mapas)
+      .map(([t, m]) => `${Object.values(m).filter(Boolean).length} ${PLURAL[t]} con foto`).join(' · ');
+    $('s-subir').disabled = false;
+  } catch (err) { aviso(err.message, 'mal'); }
+};
+$('s-subir').onclick = async () => {
+  const reemplazar = $('s-reemplazar').checked;
+  if (reemplazar && !confirm('Se borrarán del servidor las fotos de las claves que no estén en el Excel. ¿Continuar?')) return;
+  // Sin reemplazar, las celdas vacías no borran lo que ya tiene el servidor
+  const mapas = Object.fromEntries(Object.entries(S.excelImagenes).map(([t, m]) =>
+    [t, reemplazar ? m : Object.fromEntries(Object.entries(m).filter(([, u]) => u))]));
+  try {
+    await api('/api/imagenes', { method: 'PUT', json: { ...mapas, reemplazar } });
+    aviso('✓ Imágenes del Excel guardadas', 'ok');
+    await cargarTodo();
+    cargarEstado();
+  } catch (e) { aviso(e.message, 'mal'); }
+};
+
+// ── Carga
+async function cargarTodo() {
+  const [estado, xlsx, imagenes] = await Promise.all([
+    api('/api/estado'), api('/api/catalogo', { binario: true }), api('/api/imagenes'),
+  ]);
+  S.catalogo = leerCatalogo(xlsx);
+  for (const t of TIPOS) {
+    S.imagenes[t] = { ...(imagenes[t] || {}) };
+    S.porClave[t] = Object.fromEntries(S.catalogo[t].map((it) => [it.clave, it]));
+  }
+  recalcularHerencia();
+  pintarConexion(estado);
+}
+
+async function iniciar() {
+  $('cargando').classList.remove('oculto');
+  try {
+    if (typeof XLSX === 'undefined') throw new Error('No se pudo cargar el lector de Excel (cdnjs). Revise la conexión.');
+    const [yo] = await Promise.all([api('/api/yo'), cargarTodo()]);
+    $('correo').textContent = yo.correo;
+    $('cargando').classList.add('oculto');
+    abrirPestana(S.pestana);
+  } catch (e) {
+    $('cargando').textContent = `No se pudo cargar: ${e.message}`;
+    $('estado').textContent = 'Sin conexión';
+    $('estado').className = 'chip-estado mal';
+  }
+}
+$('recargar').onclick = iniciar;
+iniciar();
+</script>
+</body>
+</html>

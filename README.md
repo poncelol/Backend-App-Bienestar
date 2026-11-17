@@ -78,6 +78,34 @@ Primera vez:
 El programa busca la app en `../BienestarApp`, de donde toma `datos/config.json`. Si está en otro lugar, agregue
 `"app": "C:\\ruta\\a\\BienestarApp"` en `admin_config.json`.
 
+## Panel web de administración
+
+Lo mismo que `admin_bienestar.py`, pero en el navegador y sin instalar nada:
+**https://abasto-bienestar-admin.abasto-bienestar-servidor.workers.dev**
+
+- **Para entrar:** Cloudflare Access pide el correo y manda un código de 6 dígitos. Solo entran los correos
+  autorizados.
+- **Para agregar o quitar personas:** en dash.cloudflare.com, ve a *Zero Trust › Access › Applications*, abre la
+  aplicación de `abasto-bienestar-admin` y edita su política (*Include › Emails*). El plan gratis permite hasta
+  50 personas.
+- **Qué se puede hacer:**
+  - Ver los artículos, productos y proveedores sin foto, con filtros y búsqueda.
+  - Buscar la foto en Google/Bing, pegar un vínculo o una imagen con Ctrl+V, arrastrar o elegir un archivo.
+  - Quitar o deshacer una foto.
+  - Editar las regiones.
+  - Descargar el catálogo ahora, cambiar su vínculo o cargar el Excel de imágenes completo.
+
+Es un Worker aparte (`src/admin.ts` + `src/panel.html`, configurado en `wrangler.admin.jsonc`) con la misma base de
+datos que el público. Toda su dirección está detrás de Access y, además, el Worker comprueba la firma del pase de
+Access en cada petición (`src/acceso.ts`): si Access se desactivara por error, el panel queda cerrado, no abierto.
+
+```powershell
+npm run deploy:admin                                            # publicar el panel
+npx wrangler secret put ACCESS_EQUIPO -c wrangler.admin.jsonc   # p. ej. miequipo.cloudflareaccess.com
+npx wrangler secret put ACCESS_AUD -c wrangler.admin.jsonc      # «Audience (AUD) tag» de la aplicación de Access
+npm run dev:admin                                               # probar en http://127.0.0.1:8788 (con DESARROLLO_SIN_ACCESO=si en .dev.vars)
+```
+
 ## 3. Conectar la app
 
 En `BienestarApp/src/data/vinculos.ts`:
