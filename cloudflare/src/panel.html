@@ -23,8 +23,17 @@
   header .sub { color: #F2D6DD; }
   header .der { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .chip-estado { color: #F2D6DD; font-size: 13px; }
-  .chip-estado.ok::before { content: "● "; color: #9BE3C4; }
-  .chip-estado.mal::before { content: "● "; color: #FFB4B4; }
+  .chip-estado::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #F2D6DD; margin-right: 6px; vertical-align: 1px; }
+  .chip-estado.ok::before { background: #9BE3C4; }
+  .chip-estado.mal::before { background: #FFB4B4; }
+  /* Íconos de Lucide (https://lucide.dev, licencia ISC), dibujados en línea con el color del texto */
+  .ico { width: 1.1em; height: 1.1em; vertical-align: -0.2em; flex: none; }
+  .btn .ico, nav .ico, h2 .ico, h3 .ico { margin-right: 6px; }
+  .btn { display: inline-flex; align-items: center; }
+  .punto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 0; }
+  .punto.ok { background: var(--verde); } .punto.hereda { background: var(--dorado); } .punto.falta { background: var(--guinda); }
+  tr.sel .punto { box-shadow: 0 0 0 2px #fff; }
   .btn { border: 1px solid var(--borde); background: #fff; color: var(--texto); border-radius: 8px; padding: 7px 12px;
     cursor: pointer; white-space: nowrap; }
   .btn:hover { border-color: #C9BFB1; background: #FBF9F6; }
@@ -104,6 +113,7 @@
   .error { color: var(--guinda); font-weight: 600; }
 
   .avisos { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 20; }
+  .aviso .ico { margin-right: 4px; }
   .aviso { background: #1F1F1F; color: #fff; padding: 10px 14px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.2);
     max-width: 380px; animation: entra .2s ease-out; }
   .aviso.ok { background: var(--verde); }
@@ -130,7 +140,7 @@
   <div class="der">
     <span id="estado" class="chip-estado">Conectando…</span>
     <span id="correo" class="sub"></span>
-    <button class="btn osc" id="recargar">⟳ Recargar</button>
+    <button class="btn osc" id="recargar"><i data-ico="refresh-cw"></i>Recargar</button>
   </div>
 </header>
 <nav id="pestanas"></nav>
@@ -159,59 +169,59 @@
         <span class="insignia oculto" id="d-insignia"></span>
         <div class="fila">
           <input id="d-url" readonly placeholder="Sin imagen">
-          <button class="btn" id="d-copiar">Copiar</button>
-          <button class="btn" id="d-abrir">Abrir</button>
+          <button class="btn" id="d-copiar"><i data-ico="copy"></i>Copiar</button>
+          <button class="btn" id="d-abrir"><i data-ico="external-link"></i>Abrir</button>
         </div>
 
         <div class="caja">
-          <h3>🔎 Buscar la foto</h3>
+          <h3><i data-ico="search"></i>Buscar la foto</h3>
           <div class="fila"><input id="d-consulta"></div>
           <div class="fila">
-            <button class="btn prim" id="b-google">Buscar en Google</button>
+            <button class="btn prim" id="b-google"><i data-ico="search"></i>Buscar en Google</button>
             <button class="btn" id="b-bing">Buscar en Bing</button>
           </div>
-          <p class="ayuda">En la pestaña que se abre, clic derecho sobre la foto → <b>Copiar dirección de imagen</b> (o
+          <p class="ayuda">En la pestaña que se abre, clic derecho sobre la foto, <b>Copiar dirección de imagen</b> (o
             <b>Copiar imagen</b>) y regrese aquí a pegarla con <b>Ctrl+V</b>.</p>
         </div>
 
         <div class="caja">
-          <h3>🔗 Agregar a mano</h3>
+          <h3><i data-ico="link"></i>Agregar a mano</h3>
           <div class="fila">
             <input id="d-nueva" placeholder="Pegue el vínculo o la imagen (Ctrl+V)">
             <button class="btn prim" id="d-guardar">Guardar</button>
           </div>
           <div class="pegar">Arrastre una foto aquí o a la vista previa · o
-            <button class="btn" id="d-archivo">📁 Elegir archivo</button>
+            <button class="btn" id="d-archivo"><i data-ico="folder-open"></i>Elegir archivo</button>
             <input type="file" id="archivo" accept="image/*" class="oculto">
           </div>
           <label class="check"><input type="checkbox" id="auto" checked> Después de guardar, pasar al siguiente sin imagen</label>
         </div>
 
         <div class="fila" style="margin-top:12px;flex-wrap:wrap">
-          <button class="btn peligro" id="d-quitar">🗑 Quitar</button>
-          <button class="btn" id="d-deshacer">↩ Deshacer</button>
-          <button class="btn" id="d-siguiente" style="margin-left:auto">Siguiente sin imagen →</button>
+          <button class="btn peligro" id="d-quitar"><i data-ico="trash-2"></i>Quitar</button>
+          <button class="btn" id="d-deshacer"><i data-ico="undo-2"></i>Deshacer</button>
+          <button class="btn" id="d-siguiente" style="margin-left:auto">Siguiente sin imagen<i data-ico="arrow-right" style="margin:0 0 0 6px"></i></button>
         </div>
       </aside>
     </div>
   </section>
 
   <section id="vista-regiones" class="seccion oculto">
-    <h2>🗺️ Gerencias regionales</h2>
+    <h2><i data-ico="map"></i>Gerencias regionales</h2>
     <p class="ayuda">Nombre, clave y unidades operativas (separadas por comas). Las siglas y los estados del mapa son fijos en la app.</p>
     <div class="tabla" style="max-height:none;margin-top:10px">
       <table class="regiones"><thead><tr><th>Sigla</th><th>Nombre</th><th style="width:90px">Clave</th><th>Unidades operativas</th></tr></thead>
         <tbody id="t-regiones"></tbody></table>
     </div>
-    <div class="fila"><button class="btn prim" id="g-regiones">💾 Guardar regiones</button>
+    <div class="fila"><button class="btn prim" id="g-regiones"><i data-ico="save"></i>Guardar regiones</button>
       <span class="ayuda" id="reg-origen"></span></div>
   </section>
 
   <section id="vista-servidor" class="seccion oculto">
-    <h2>⚙️ Servidor</h2>
+    <h2><i data-ico="settings"></i>Servidor</h2>
     <div class="tarjetas" id="tarjetas"></div>
     <div class="fila">
-      <button class="btn prim" id="s-sincronizar">🔄 Descargar el catálogo ahora</button>
+      <button class="btn prim" id="s-sincronizar"><i data-ico="refresh-cw"></i>Descargar el catálogo ahora</button>
     </div>
     <p class="ayuda">El servidor descarga solo el Excel del catálogo cada 15 minutos; este botón sirve para no esperar.</p>
 
@@ -228,7 +238,7 @@
       <p class="ayuda">Sube de golpe la columna IMAGEN de las hojas PROVEEDORES y ARTICULOS. La base de datos es la que manda.</p>
       <div class="fila"><input type="file" id="s-excel" accept=".xlsx"></div>
       <label class="check"><input type="checkbox" id="s-reemplazar"> Además, borrar las fotos de claves que no estén en el Excel</label>
-      <div class="fila"><button class="btn" id="s-subir" disabled>⬆ Subir imágenes del Excel</button>
+      <div class="fila"><button class="btn" id="s-subir" disabled><i data-ico="upload"></i>Subir imágenes del Excel</button>
         <span class="ayuda" id="s-excel-info"></span></div>
     </div>
   </section>
@@ -237,9 +247,24 @@
 
 <script>
 'use strict';
+/* Íconos de Lucide v0.460.0 (https://lucide.dev, licencia ISC) */
+const LUCIDE = {"arrow-right": "<path d=\"M5 12h14\" /> <path d=\"m12 5 7 7-7 7\" />", "building-2": "<path d=\"M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z\" /> <path d=\"M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2\" /> <path d=\"M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2\" /> <path d=\"M10 6h4\" /> <path d=\"M10 10h4\" /> <path d=\"M10 14h4\" /> <path d=\"M10 18h4\" />", "circle-check": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <path d=\"m9 12 2 2 4-4\" />", "circle-x": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <path d=\"m15 9-6 6\" /> <path d=\"m9 9 6 6\" />", "copy": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\" /> <path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\" />", "external-link": "<path d=\"M15 3h6v6\" /> <path d=\"M10 14 21 3\" /> <path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\" />", "folder-open": "<path d=\"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2\" />", "link": "<path d=\"M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71\" /> <path d=\"M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71\" />", "map": "<path d=\"M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z\" /> <path d=\"M15 5.764v15\" /> <path d=\"M9 3.236v15\" />", "package": "<path d=\"M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z\" /> <path d=\"M12 22V12\" /> <path d=\"m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7\" /> <path d=\"m7.5 4.27 9 5.15\" />", "refresh-cw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\" /> <path d=\"M21 3v5h-5\" /> <path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\" /> <path d=\"M8 16H3v5\" />", "save": "<path d=\"M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z\" /> <path d=\"M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7\" /> <path d=\"M7 3v4a1 1 0 0 0 1 1h7\" />", "search": "<circle cx=\"11\" cy=\"11\" r=\"8\" /> <path d=\"m21 21-4.3-4.3\" />", "settings": "<path d=\"M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z\" /> <circle cx=\"12\" cy=\"12\" r=\"3\" />", "trash-2": "<path d=\"M3 6h18\" /> <path d=\"M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6\" /> <path d=\"M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2\" /> <line x1=\"10\" x2=\"10\" y1=\"11\" y2=\"17\" /> <line x1=\"14\" x2=\"14\" y1=\"11\" y2=\"17\" />", "triangle-alert": "<path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\" /> <path d=\"M12 9v4\" /> <path d=\"M12 17h.01\" />", "undo-2": "<path d=\"M9 14 4 9l5-5\" /> <path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\" />", "upload": "<path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\" /> <polyline points=\"17 8 12 3 7 8\" /> <line x1=\"12\" x2=\"12\" y1=\"3\" y2=\"15\" />"};
+const ico = (n) => `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LUCIDE[n] || ''}</svg>`;
+/** Cambia cada <i data-ico="nombre"> por su ícono. */
+function pintarIconos(raiz = document) {
+  for (const el of raiz.querySelectorAll('i[data-ico]')) {
+    const tmp = document.createElement('template');
+    tmp.innerHTML = ico(el.dataset.ico);
+    const svg = tmp.content.firstElementChild;
+    if (el.getAttribute('style')) svg.setAttribute('style', el.getAttribute('style'));
+    el.replaceWith(svg);
+  }
+}
+pintarIconos();
 // Los productos no llevan foto: la app genera su ilustración a partir del nombre
 const TIPOS = ['articulos', 'proveedores'];
-const TITULO = { articulos: '📦 Artículos', proveedores: '🏭 Proveedores' };
+const TITULO = { articulos: 'Artículos', proveedores: 'Proveedores' };
+const ICONO_PESTANA = { articulos: 'package', proveedores: 'building-2', regiones: 'map', servidor: 'settings' };
 const PLURAL = { articulos: 'artículos', productos: 'productos', proveedores: 'proveedores' };
 const SINGULAR = { articulos: 'artículo', productos: 'producto', proveedores: 'proveedor' };
 const LLAVE = { articulos: 'ART.', productos: 'PROD.', proveedores: 'CVE' };
@@ -248,7 +273,7 @@ const COLUMNAS = {
   productos: [['estado', 'Estado'], ['clave', 'PROD.'], ['nombre', 'Producto'], ['articulos', 'Artículos']],
   proveedores: [['estado', 'Estado'], ['clave', 'CVE'], ['nombre', 'Proveedor'], ['articulos', 'Artículos']],
 };
-const ESTADO_TEXTO = { ok: '✓ Con foto', hereda: '◐ De un artículo', falta: '✗ Falta' };
+const ESTADO_TEXTO = { ok: 'Con foto', hereda: 'De un artículo', falta: 'Falta' };
 const REGIONES_APP = [
   ['NOE', 'Noroeste', 41, ['Sinaloa', 'Baja California', 'Baja California Sur', 'Sonora']],
   ['NOR', 'Norte', 42, ['Chihuahua', 'Durango', 'Coahuila']],
@@ -281,10 +306,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const sinAcentos = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const hora = (iso) => (iso ? new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
+const estadoHtml = (e) => `<span class="punto ${e}"></span>${ESTADO_TEXTO[e]}`;
+
 function aviso(texto, tipo = '') {
   const d = document.createElement('div');
   d.className = `aviso ${tipo}`;
-  d.textContent = texto;
+  d.innerHTML = (tipo === 'ok' ? ico('circle-check') : tipo === 'mal' ? ico('triangle-alert') : '') + ' ';
+  d.append(texto);
   $('avisos').append(d);
   setTimeout(() => d.remove(), tipo === 'mal' ? 7000 : 3500);
 }
@@ -389,10 +417,10 @@ const faltan = (tipo) => S.catalogo[tipo].filter((it) => estadoDe(tipo, it)[0] =
 
 // ── Pestañas
 function pintarPestanas() {
-  const nombres = { ...TITULO, regiones: '🗺️ Regiones', servidor: '⚙️ Servidor' };
+  const nombres = { ...TITULO, regiones: 'Regiones', servidor: 'Servidor' };
   $('pestanas').innerHTML = Object.entries(nombres).map(([k, t]) => {
     const n = TIPOS.includes(k) ? faltan(k) : 0;
-    return `<button data-p="${k}" class="${S.pestana === k ? 'activa' : ''}">${t}${n ? `<span class="n">${n}</span>` : ''}</button>`;
+    return `<button data-p="${k}" class="${S.pestana === k ? 'activa' : ''}">${ico(ICONO_PESTANA[k])}${t}${n ? `<span class="n">${n}</span>` : ''}</button>`;
   }).join('');
 }
 $('pestanas').addEventListener('click', (e) => {
@@ -453,7 +481,7 @@ function pintarTabla() {
   const filas = filasVisibles(tipo);
   $('tbody').innerHTML = filas.length ? filas.map(({ it, v }) =>
     `<tr data-k="${esc(it.clave)}" class="${v.estado}${S.sel[tipo] === it.clave ? ' sel' : ''}">` +
-    COLUMNAS[tipo].map(([c]) => `<td title="${esc(c === 'estado' ? '' : v[c])}">${esc(c === 'estado' ? ESTADO_TEXTO[v.estado] : v[c])}</td>`).join('') +
+    COLUMNAS[tipo].map(([c]) => `<td title="${esc(c === 'estado' ? '' : v[c])}">${c === 'estado' ? estadoHtml(v.estado) : esc(v[c])}</td>`).join('') +
     '</tr>').join('') : `<tr><td colspan="9" class="vacio">Nada que mostrar con este filtro.</td></tr>`;
   $('mostrando').textContent = `Mostrando ${filas.length.toLocaleString('es-MX')}`;
   pintarResumen();
@@ -465,7 +493,7 @@ function pintarResumen() {
   const f = faltan(tipo);
   $('r-texto').textContent = `${(total - f).toLocaleString('es-MX')} de ${total.toLocaleString('es-MX')} ${PLURAL[tipo]} con imagen`;
   $('r-barra').style.width = `${total ? (100 * (total - f)) / total : 0}%`;
-  $('r-faltan').textContent = f ? `✗ ${f} sin imagen` : '✓ Todos tienen imagen';
+  $('r-faltan').innerHTML = f ? `${ico('circle-x')} ${f} sin imagen` : `${ico('circle-check')} Todos tienen imagen`;
   $('r-faltan').classList.toggle('cero', !f);
 }
 
@@ -478,7 +506,7 @@ function actualizarFila(tipo, k) {
   if (tr && it) {
     const v = valores(tipo, it);
     tr.className = `${v.estado}${S.sel[tipo] === k ? ' sel' : ''}`;
-    tr.firstElementChild.textContent = ESTADO_TEXTO[v.estado];
+    tr.firstElementChild.innerHTML = estadoHtml(v.estado);
   }
   pintarResumen();
   if (S.sel[tipo] === k) mostrarDetalle();
@@ -536,7 +564,7 @@ function siguienteSinImagen() {
   const orden = [...filas.slice(i + 1), ...filas.slice(0, Math.max(i, 0))];
   const k = orden.find((x) => estadoDe(tipo, S.porClave[tipo][x])[0] === 'falta');
   if (k) seleccionar(k, true);
-  else aviso(`🎉 Ya no quedan ${PLURAL[tipo]} sin imagen en la lista.`, 'ok');
+  else aviso(`Ya no quedan ${PLURAL[tipo]} sin imagen en la lista.`, 'ok');
 }
 
 // ── Detalle
@@ -613,7 +641,7 @@ async function guardar(tipo, k, url, { deshacer = true, avanzar = false } = {}) 
   if (url) S.imagenes[tipo][k] = url; else delete S.imagenes[tipo][k];
   if (deshacer) S.historial.push([tipo, k, anterior]);
   actualizarFila(tipo, k);
-  aviso(`${url ? '✓ Guardada' : '✓ Quitada'} la imagen de ${SINGULAR[tipo]} ${k}`, 'ok');
+  aviso(`${url ? 'Guardada' : 'Quitada'} la imagen de ${SINGULAR[tipo]} ${k}`, 'ok');
   if (avanzar && $('auto').checked && S.pestana === tipo && S.sel[tipo] === k) siguienteSinImagen();
 }
 
@@ -722,7 +750,7 @@ $('g-regiones').onclick = async () => {
   }));
   try {
     const r = await api('/api/regiones', { method: 'PUT', json: regiones });
-    aviso(`✓ ${r.regiones} regiones guardadas`, 'ok');
+    aviso(`${r.regiones} regiones guardadas`, 'ok');
     $('reg-origen').textContent = '';
   } catch (e) { aviso(e.message, 'mal'); }
 };
@@ -746,14 +774,14 @@ async function cargarEstado() {
 }
 function pintarConexion(e) {
   const c = e.catalogo;
-  $('estado').textContent = `Conectado · catálogo del ${hora(c.actualizado)}${c.error ? ' · ⚠ error' : ''}`;
+  $('estado').textContent = `Conectado · catálogo del ${hora(c.actualizado)}${c.error ? ' · con error' : ''}`;
   $('estado').className = `chip-estado ${c.error ? 'mal' : 'ok'}`;
 }
 $('s-sincronizar').onclick = async (ev) => {
   ev.target.disabled = true;
   try {
     const r = await api('/api/sincronizar', { method: 'POST' });
-    aviso(`✓ Catálogo descargado (${Math.round(r.bytes / 1024)} KB)`, 'ok');
+    aviso(`Catálogo descargado (${Math.round(r.bytes / 1024)} KB)`, 'ok');
     await cargarTodo();
     cargarEstado();
   } catch (e) { aviso(e.message, 'mal'); } finally { ev.target.disabled = false; }
@@ -763,7 +791,7 @@ $('s-cambiar').onclick = async () => {
   if (!link) return;
   try {
     const r = await api('/api/config', { method: 'PUT', json: { link_catalogo: link } });
-    aviso(`✓ Vínculo cambiado; Excel descargado (${Math.round(r.bytes / 1024)} KB)`, 'ok');
+    aviso(`Vínculo cambiado; Excel descargado (${Math.round(r.bytes / 1024)} KB)`, 'ok');
     $('s-link').value = '';
     await cargarTodo();
     cargarEstado();
@@ -801,7 +829,7 @@ $('s-subir').onclick = async () => {
     [t, reemplazar ? m : Object.fromEntries(Object.entries(m).filter(([, u]) => u))]));
   try {
     await api('/api/imagenes', { method: 'PUT', json: { ...mapas, reemplazar } });
-    aviso('✓ Imágenes del Excel guardadas', 'ok');
+    aviso('Imágenes del Excel guardadas', 'ok');
     await cargarTodo();
     cargarEstado();
   } catch (e) { aviso(e.message, 'mal'); }
