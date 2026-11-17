@@ -22,6 +22,9 @@ export interface Env {
 
 export const TIPOS = ['proveedores', 'productos', 'articulos'] as const;
 export const CLAVE_CATALOGO = 'catalogo.xlsx';
+/** La versión inmediata anterior del catálogo: con ella la app calcula las novedades (qué cambió en la última versión). */
+export const CLAVE_ANTERIOR = 'catalogo.anterior.xlsx';
+type MetaCatalogo = { sha256: string; actualizado: string; anterior?: string; anteriorFecha?: string };
 export const MAX_FOTO = 5 * 1024 * 1024;
 // Sin un User-Agent de navegador SharePoint responde 403 aunque el vínculo sea público
 export const NAVEGADOR = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
@@ -30,7 +33,7 @@ export const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
   'Access-Control-Allow-Headers': 'Cache-Control, If-None-Match',
-  'Access-Control-Expose-Headers': 'ETag, X-Actualizado',
+  'Access-Control-Expose-Headers': 'ETag, X-Actualizado, X-Anterior, X-Anterior-Fecha',
 };
 
 export class ErrorHttp extends Error {
@@ -126,8 +129,16 @@ export async function sincronizar(env: Env, { forzar = false, link }: { forzar?:
     const cambio = forzar || !!link || sha256 !== config.catalogo_sha256;
     const actualizado = cambio ? revisado : config.catalogo_actualizado;
     if (cambio) {
+      // La versión que se reemplaza pasa a ser la «anterior» (solo si de verdad es otra; «Descargar ahora» con el
+      // mismo Excel conserva la anterior que ya había)
+      const actual = await env.ARCHIVOS.getWithMetadata<MetaCatalogo>(CLAVE_CATALOGO, 'arrayBuffer');
+      let anterior = { anterior: actual.metadata?.anterior, anteriorFecha: actual.metadata?.anteriorFecha };
+      if (actual.value && actual.metadata?.sha256 && actual.metadata.sha256 !== sha256) {
+        await env.ARCHIVOS.put(CLAVE_ANTERIOR, actual.value, { metadata: actual.metadata });
+        anterior = { anterior: actual.metadata.sha256, anteriorFecha: actual.metadata.actualizado };
+      }
       await env.ARCHIVOS.delete(CLAVE_CATALOGO);
-      await env.ARCHIVOS.put(CLAVE_CATALOGO, contenido, { metadata: { sha256, actualizado } });
+      await env.ARCHIVOS.put(CLAVE_CATALOGO, contenido, { metadata: { sha256, actualizado, ...anterior } satisfies MetaCatalogo });
     }
     await env.DB.batch([
       guardar(env, 'catalogo_revisado', revisado),
@@ -150,16 +161,31 @@ export async function sincronizar(env: Env, { forzar = false, link }: { forzar?:
   }
 }
 
-export async function catalogo(env: Env, request: Request): Promise<Response> {
-  let guardado = await env.ARCHIVOS.getWithMetadata<{ sha256: string; actualizado: string }>(CLAVE_CATALOGO, 'arrayBuffer');
+/**
+ * El catálogo actual (o, con `anterior`, la versión inmediata anterior). Encabezados: ETag = huella de la versión,
+ * X-Actualizado = cuándo apareció, X-Anterior / X-Anterior-Fecha = huella y fecha de la versión anterior.
+ */
+export async function catalogo(env: Env, request: Request, anterior = false): Promise<Response> {
+  if (anterior) {
+    const previo = await env.ARCHIVOS.getWithMetadata<MetaCatalogo>(CLAVE_ANTERIOR, 'arrayBuffer');
+    if (!previo.value) throw new ErrorHttp(404, 'Todavía no hay una versión anterior del catálogo.');
+    return new Response(previo.value, { headers: {
+      ...CORS, ETag: `"${previo.metadata?.sha256 ?? ''}"`, 'X-Actualizado': previo.metadata?.actualizado ?? '',
+      'Cache-Control': 'no-cache', 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' } });
+  }
+  let guardado = await env.ARCHIVOS.getWithMetadata<MetaCatalogo>(CLAVE_CATALOGO, 'arrayBuffer');
   if (!guardado.value) {
     // Primera vez: aún no corre el cron
     await sincronizar(env, { forzar: true });
-    guardado = await env.ARCHIVOS.getWithMetadata<{ sha256: string; actualizado: string }>(CLAVE_CATALOGO, 'arrayBuffer');
+    guardado = await env.ARCHIVOS.getWithMetadata<MetaCatalogo>(CLAVE_CATALOGO, 'arrayBuffer');
     if (!guardado.value) throw new ErrorHttp(503, 'El catálogo aún no está disponible; intente en un minuto.');
   }
   const etag = `"${guardado.metadata?.sha256 ?? ''}"`;
-  const encabezados = { ...CORS, ETag: etag, 'X-Actualizado': guardado.metadata?.actualizado ?? '', 'Cache-Control': 'no-cache' };
+  const encabezados = {
+    ...CORS, ETag: etag, 'X-Actualizado': guardado.metadata?.actualizado ?? '', 'Cache-Control': 'no-cache',
+    'X-Anterior': guardado.metadata?.anterior ? `"${guardado.metadata.anterior}"` : '',
+    'X-Anterior-Fecha': guardado.metadata?.anteriorFecha ?? '',
+  };
   if (request.headers.get('If-None-Match') === etag) return new Response(null, { status: 304, headers: encabezados });
   return new Response(guardado.value, {
     headers: { ...encabezados, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
@@ -343,6 +369,7 @@ export async function rutaAdmin(env: Env, request: Request, ruta: string, origen
 /** Rutas de solo lectura que también usa el panel. Devuelve null si la ruta no existe. */
 export async function rutaLectura(env: Env, request: Request, pathname: string): Promise<Response | null> {
   if (pathname === '/api/catalogo') return catalogo(env, request);
+  if (pathname === '/api/catalogo/anterior') return catalogo(env, request, true);
   if (pathname === '/api/imagenes') return publicado(env, request, 'imagenes', '{"proveedores":{},"productos":{},"articulos":{}}');
   if (pathname === '/api/regiones') return publicado(env, request, 'regiones', '[]');
   if (pathname.startsWith('/fotos/')) return verFoto(env, nombreFoto(pathname.slice(7)));
