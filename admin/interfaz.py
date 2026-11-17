@@ -2,7 +2,7 @@
 """
 Ventana de administración (python admin_bienestar.py).
 
-Se conecta al servidor: toma el catálogo (artículos, productos y proveedores) y las imágenes de la base de datos,
+Se conecta al servidor: toma el catálogo (artículos y proveedores) y las imágenes de la base de datos,
 y muestra cuáles tienen foto, cuáles no tienen y cuáles tienen un vínculo que ya no se ve. Para poner una foto:
   - Buscar en Chrome (Google/Bing Imágenes): se hace clic en la foto correcta y se guarda sola.
   - Pegar un vínculo.
@@ -50,7 +50,6 @@ SINGULAR = {"articulos": "artículo", "productos": "producto", "proveedores": "p
 COLUMNAS = {
     "articulos": [("estado", "Estado", 120), ("clave", "ART.", 80), ("nombre", "Artículo", 330),
                   ("marca", "Marca", 120), ("proveedor", "Proveedor", 220)],
-    "productos": [("estado", "Estado", 130), ("clave", "PROD.", 70), ("nombre", "Producto", 380), ("articulos", "Artículos", 80)],
     "proveedores": [("estado", "Estado", 120), ("clave", "CVE", 70), ("nombre", "Proveedor", 400), ("articulos", "Artículos", 80)],
 }
 FILTROS = [("todos", "Todos"), ("falta", "Sin foto"), ("rota", "No se ve"), ("ok", "Con foto")]
@@ -780,9 +779,6 @@ class App:
                 self.imagenes[tipo].pop(k, None)
             if deshacer:
                 self.historial.append((tipo, k, anterior))
-            if tipo == "articulos":
-                self._calcular_herencia()
-                self.paneles["productos"].repintar()   # un producto puede tomar la foto de este artículo
             nombre = self.paneles[tipo].por_clave.get(k, {}).get("nombre", k)
             self.anotar(f"{'Guardada' if url else 'Quitada'} la imagen de {SINGULAR[tipo]} {k} · {nombre}")
             if url:

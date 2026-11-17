@@ -4,8 +4,8 @@
 Administración del servidor de Abasto Bienestar (Cloudflare).
 
 Cambia lo que la app toma del servidor, sin publicar una versión nueva de la app:
-  · Imágenes de proveedores (CVE), productos (PROD.) y artículos (ART.): desde el Excel interno de imágenes
-    (hojas PROVEEDORES, PRODUCTOS y ARTICULOS, columna IMAGEN) o una por una, con un vínculo o con un archivo
+  · Imágenes de proveedores (CVE) y artículos (ART.): desde el Excel interno de imágenes
+    (hojas PROVEEDORES y ARTICULOS, columna IMAGEN) o una por una, con un vínculo o con un archivo
     de foto que se sube al servidor.
   · Gerencias regionales (nombre, clave y unidades operativas): hoja REGIONES del mismo Excel.
   · Vínculo del Excel del catálogo, y descargarlo ya en vez de esperar los 15 minutos.
@@ -63,7 +63,8 @@ def carpeta_app() -> Path:
 RAIZ = carpeta_app()
 
 # Hoja del Excel -> (tipo en el servidor, columna con la clave)
-HOJAS = {"PROVEEDORES": ("proveedores", "CVE"), "PRODUCTOS": ("productos", "PROD."), "ARTICULOS": ("articulos", "ART.")}
+# Los productos no llevan foto: la app genera su ilustración a partir del nombre
+HOJAS = {"PROVEEDORES": ("proveedores", "CVE"), "ARTICULOS": ("articulos", "ART.")}
 TIPO_A_HOJA = {tipo: hoja for hoja, (tipo, _) in HOJAS.items()}
 HOJA_REGIONES = "REGIONES"
 COLUMNAS_REGIONES = ["SIGLA", "NOMBRE", "CLAVE", "UNIDADES"]
@@ -212,7 +213,7 @@ def encabezados(ws) -> dict:
 
 
 def leer_imagenes(ruta: str) -> dict:
-    """{tipo: {clave: url}} de las hojas PROVEEDORES, PRODUCTOS y ARTICULOS. Una IMAGEN vacía se manda como ""
+    """{tipo: {clave: url}} de las hojas PROVEEDORES y ARTICULOS. Una IMAGEN vacía se manda como ""
     para que el servidor quite la foto que tenía."""
     libro = load_workbook(ruta, read_only=True, data_only=True)
     try:
@@ -232,7 +233,7 @@ def leer_imagenes(ruta: str) -> dict:
                     mapa[k] = str(url).strip() if url else ""
             salida[tipo] = mapa
         if not salida:
-            raise ValueError("El Excel no tiene ninguna de las hojas PROVEEDORES, PRODUCTOS o ARTICULOS.")
+            raise ValueError("El Excel no tiene ninguna de las hojas PROVEEDORES o ARTICULOS.")
         return salida
     finally:
         libro.close()
@@ -453,7 +454,7 @@ def texto_estado(e: dict) -> str:
     if c.get("error"):
         lineas.append(f"  Último error: {c['error']}")
     i = e["imagenes"]
-    lineas.append(f"Imágenes: {i['proveedores']} proveedores · {i['productos']} productos · {i['articulos']} artículos")
+    lineas.append(f"Imágenes: {i['proveedores']} proveedores · {i['articulos']} artículos")
     lineas.append(f"Regiones en el servidor: {e['regiones'] or 'ninguna (la app usa las suyas)'}")
     return "\n".join(lineas)
 

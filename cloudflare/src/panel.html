@@ -225,7 +225,7 @@
 
     <div class="caja">
       <h3>Carga completa desde el Excel de imágenes</h3>
-      <p class="ayuda">Sube de golpe la columna IMAGEN de las hojas PROVEEDORES, PRODUCTOS y ARTICULOS. La base de datos es la que manda.</p>
+      <p class="ayuda">Sube de golpe la columna IMAGEN de las hojas PROVEEDORES y ARTICULOS. La base de datos es la que manda.</p>
       <div class="fila"><input type="file" id="s-excel" accept=".xlsx"></div>
       <label class="check"><input type="checkbox" id="s-reemplazar"> Además, borrar las fotos de claves que no estén en el Excel</label>
       <div class="fila"><button class="btn" id="s-subir" disabled>⬆ Subir imágenes del Excel</button>
@@ -237,8 +237,9 @@
 
 <script>
 'use strict';
-const TIPOS = ['articulos', 'productos', 'proveedores'];
-const TITULO = { articulos: '📦 Artículos', productos: '🏷️ Productos', proveedores: '🏭 Proveedores' };
+// Los productos no llevan foto: la app genera su ilustración a partir del nombre
+const TIPOS = ['articulos', 'proveedores'];
+const TITULO = { articulos: '📦 Artículos', proveedores: '🏭 Proveedores' };
 const PLURAL = { articulos: 'artículos', productos: 'productos', proveedores: 'proveedores' };
 const SINGULAR = { articulos: 'artículo', productos: 'producto', proveedores: 'proveedor' };
 const LLAVE = { articulos: 'ART.', productos: 'PROD.', proveedores: 'CVE' };
@@ -735,7 +736,7 @@ async function cargarEstado() {
       ['Catálogo actualizado', hora(c.actualizado)],
       ['Última revisión', hora(c.revisado)],
       ['Tamaño del Excel', `${Math.round(c.bytes / 1024)} KB`],
-      ['Imágenes', `${e.imagenes.articulos} art. · ${e.imagenes.productos} prod. · ${e.imagenes.proveedores} prov.`],
+      ['Imágenes', `${e.imagenes.articulos} art. · ${e.imagenes.proveedores} prov.`],
       ['Regiones', e.regiones || 'las de la app'],
     ].map(([et, v]) => `<div class="tarjeta"><div class="et">${et}</div><div class="v">${esc(v)}</div></div>`).join('') +
       (c.error ? `<div class="tarjeta"><div class="et">Último error</div><div class="error">${esc(c.error)}</div></div>` : '');
@@ -775,7 +776,7 @@ $('s-excel').onchange = async (e) => {
   if (!archivo) return;
   try {
     const libro = XLSX.read(new Uint8Array(await archivo.arrayBuffer()), { type: 'array' });
-    const hojas = { PROVEEDORES: ['proveedores', 'CVE'], PRODUCTOS: ['productos', 'PROD.'], ARTICULOS: ['articulos', 'ART.'] };
+    const hojas = { PROVEEDORES: ['proveedores', 'CVE'], ARTICULOS: ['articulos', 'ART.'] };
     const mapas = {};
     for (const [hoja, [tipo, llave]] of Object.entries(hojas)) {
       if (!libro.Sheets[hoja]) continue;
@@ -785,7 +786,7 @@ $('s-excel').onchange = async (e) => {
         if (k) mapas[tipo][k] = String(r.IMAGEN || '').trim();
       }
     }
-    if (!Object.keys(mapas).length) throw new Error('El Excel no tiene las hojas PROVEEDORES, PRODUCTOS o ARTICULOS.');
+    if (!Object.keys(mapas).length) throw new Error('El Excel no tiene las hojas PROVEEDORES o ARTICULOS.');
     S.excelImagenes = mapas;
     $('s-excel-info').textContent = Object.entries(mapas)
       .map(([t, m]) => `${Object.values(m).filter(Boolean).length} ${PLURAL[t]} con foto`).join(' · ');
