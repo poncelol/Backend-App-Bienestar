@@ -3,25 +3,29 @@
 Ventana de administración (python admin_bienestar.py).
 
 Se conecta al servidor: toma el catálogo (artículos, productos y proveedores) y las imágenes de la base de datos,
-y muestra cuáles tienen foto y cuáles no. Para poner una foto:
-  🔎 Buscar en Chrome (Google/Bing Imágenes): se hace clic en la foto correcta y se guarda sola.
-  🔗 Pegar un vínculo.
-  📁 Subir un archivo (PNG, JPG, WEBP…).
+y muestra cuáles tienen foto, cuáles no tienen y cuáles tienen un vínculo que ya no se ve. Para poner una foto:
+  - Buscar en Chrome (Google/Bing Imágenes): se hace clic en la foto correcta y se guarda sola.
+  - Pegar un vínculo.
+  - Subir un archivo (PNG, JPG, WEBP...): se reduce a 800 px en WEBP para no llenar el almacenamiento.
 """
 
 import io
+import json
 import queue
 import threading
 import tkinter as tk
-import tkinter.simpledialog  # noqa: F401 — registra tk.simpledialog
+import tkinter.simpledialog  # noqa: F401 (registra tk.simpledialog)
 import unicodedata
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import requests
 
 import admin_bienestar as nucleo
+from iconos import Iconos
 from navegador import MOTORES, Navegador, fuente_de, url_busqueda
 
 try:
@@ -32,12 +36,16 @@ except ImportError:  # sin Pillow no hay vista previa ni subida de archivos
 C = {
     "guinda": "#9B2247", "guinda_osc": "#611232", "verde": "#1E5B4F", "dorado": "#A57F2C",
     "fondo": "#F6F3EE", "panel": "#FFFFFF", "texto": "#1F1F1F", "gris": "#6B6B6B", "borde": "#DDD6CC",
-    "falta": "#FBE5E8", "hereda": "#FFF3D6", "ok": "#FFFFFF",
+    "falta": "#FBE5E8", "rota": "#FDEBD3", "hereda": "#FFF6DC",
 }
 FUENTE = "Segoe UI"
 FOTO_W, FOTO_H = 330, 200
-ESTADOS = {"ok": "✓ Con foto", "hereda": "◐ De un artículo", "falta": "✗ Falta"}
-TITULOS = {"articulos": "📦 Artículos", "productos": "🏷️ Productos", "proveedores": "🏭 Proveedores"}
+# Estado de cada renglón: con foto que se ve, con vínculo que no se ve, sin foto, o (productos) la de un artículo
+ESTADOS = {"ok": "Con foto", "rota": "No se ve", "falta": "Sin foto", "hereda": "De un artículo"}
+COLORES_ESTADO = {"ok": ("#E3F1EC", C["verde"]), "rota": ("#FDEBD3", "#9A4A0B"),
+                  "falta": ("#FBE5E8", C["guinda"]), "hereda": ("#FFF3D6", "#7A5C1E")}
+PRIORIDAD = {"falta": 0, "rota": 1, "hereda": 2, "ok": 3}
+TITULOS = {"articulos": "Artículos", "productos": "Productos", "proveedores": "Proveedores"}
 SINGULAR = {"articulos": "artículo", "productos": "producto", "proveedores": "proveedor"}
 COLUMNAS = {
     "articulos": [("estado", "Estado", 120), ("clave", "ART.", 80), ("nombre", "Artículo", 330),
@@ -45,16 +53,19 @@ COLUMNAS = {
     "productos": [("estado", "Estado", 130), ("clave", "PROD.", 70), ("nombre", "Producto", 380), ("articulos", "Artículos", 80)],
     "proveedores": [("estado", "Estado", 120), ("clave", "CVE", 70), ("nombre", "Proveedor", 400), ("articulos", "Artículos", 80)],
 }
+FILTROS = [("todos", "Todos"), ("falta", "Sin foto"), ("rota", "No se ve"), ("ok", "Con foto")]
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+# Resultado de revisar cada vínculo (no se sube a git); se vuelve a revisar después de DIAS_REVISION
+ARCHIVO_REVISION = Path(__file__).with_name(".fotos_revisadas.json")
+DIAS_REVISION = 7
 
 
 def hora_local(iso: str | None) -> str:
     """'2026-11-17T18:37:39Z' -> '17/11/2026 12:37' en la hora de esta computadora."""
-    from datetime import datetime
     try:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone().strftime("%d/%m/%Y %H:%M")
     except (AttributeError, ValueError):
-        return "—"
+        return "-"
 
 
 def sin_acentos(s: str) -> str:
@@ -79,9 +90,7 @@ def consulta_para(tipo: str, item: dict) -> str:
     return nombre
 
 
-# ──────────────────────────────────────────────────────────────
 # Una pestaña de imágenes (artículos, productos o proveedores)
-# ──────────────────────────────────────────────────────────────
 class PanelImagenes(ttk.Frame):
     def __init__(self, padre, app: "App", tipo: str):
         super().__init__(padre, style="Fondo.TFrame", padding=10)
@@ -92,26 +101,36 @@ class PanelImagenes(ttk.Frame):
         self.orden = ("estado", False)
         self._construir()
 
-    # ── construcción
+    def _boton(self, padre, texto, icono, comando, estilo="TButton", color="#3A3A3A"):
+        img = self.app.iconos.get(icono, "white" if estilo == "Accent.TButton" else color, 16)
+        return ttk.Button(padre, text=texto, image=img, compound="left" if img else "none", command=comando, style=estilo)
+
+    def _titulo_caja(self, padre, texto, icono):
+        img = self.app.iconos.get(icono, C["guinda_osc"], 16)
+        return ttk.Label(padre, text=" " + texto, image=img, compound="left", style="CajaTitulo.TLabel")
+
     def _construir(self):
         arriba = ttk.Frame(self, style="Fondo.TFrame")
         arriba.pack(fill="x")
-        self.lbl_resumen = ttk.Label(arriba, text="Cargando…", style="Resumen.TLabel")
+        self.lbl_resumen = ttk.Label(arriba, text="Cargando...", style="Resumen.TLabel")
         self.lbl_resumen.pack(side="left")
         self.barra = ttk.Progressbar(arriba, length=220, maximum=100, style="Avance.Horizontal.TProgressbar")
         self.barra.pack(side="left", padx=12)
         self.lbl_faltan = ttk.Label(arriba, text="", style="Falta.TLabel")
         self.lbl_faltan.pack(side="left")
+        self.lbl_rotas = ttk.Label(arriba, text="", style="Rota.TLabel",
+                                   image=self.app.iconos.get("alerta", "#9A4A0B", 14), compound="left")
+        self.lbl_rotas.pack(side="left", padx=(14, 0))
 
         filtros = ttk.Frame(self, style="Fondo.TFrame")
         filtros.pack(fill="x", pady=(8, 6))
-        ttk.Label(filtros, text="🔍", style="Fondo.TLabel").pack(side="left")
+        ttk.Label(filtros, image=self.app.iconos.get("buscar", C["gris"], 16), style="Fondo.TLabel").pack(side="left")
         self.v_buscar = tk.StringVar()
         self.v_buscar.trace_add("write", lambda *_: self.refrescar())
-        ttk.Entry(filtros, textvariable=self.v_buscar, width=36).pack(side="left", padx=(4, 12))
-        self.v_filtro = tk.StringVar(value="Todos")
-        for opcion in ("Todos", "Sin imagen", "Con imagen"):
-            ttk.Radiobutton(filtros, text=opcion, value=opcion, variable=self.v_filtro, style="Filtro.TRadiobutton",
+        ttk.Entry(filtros, textvariable=self.v_buscar, width=36).pack(side="left", padx=(6, 12))
+        self.v_filtro = tk.StringVar(value="todos")
+        for valor, texto in FILTROS:
+            ttk.Radiobutton(filtros, text=texto, value=valor, variable=self.v_filtro, style="Filtro.TRadiobutton",
                             command=self.refrescar).pack(side="left", padx=2)
         self.lbl_mostrando = ttk.Label(filtros, text="", style="Gris.TLabel")
         self.lbl_mostrando.pack(side="right")
@@ -126,8 +145,8 @@ class PanelImagenes(ttk.Frame):
         for c, titulo, ancho in cols:
             self.tabla.heading(c, text=titulo, command=lambda c=c: self._ordenar_por(c))
             self.tabla.column(c, width=ancho, minwidth=50, anchor="w", stretch=c == "nombre")
-        self.tabla.tag_configure("falta", background=C["falta"])
-        self.tabla.tag_configure("hereda", background=C["hereda"])
+        for estado in ("falta", "rota", "hereda"):
+            self.tabla.tag_configure(estado, background=C[estado])
         barra = ttk.Scrollbar(izq, orient="vertical", command=self.tabla.yview)
         self.tabla.configure(yscrollcommand=barra.set)
         self.tabla.pack(side="left", fill="both", expand=True)
@@ -151,45 +170,46 @@ class PanelImagenes(ttk.Frame):
         self.lbl_titulo.pack(anchor="w", pady=(6, 0))
         self.lbl_sub = ttk.Label(der, text="", style="GrisPanel.TLabel", wraplength=FOTO_W)
         self.lbl_sub.pack(anchor="w")
-        self.lbl_estado = tk.Label(der, text="", font=(FUENTE, 9, "bold"), padx=8, pady=2)
+        self.lbl_estado = tk.Label(der, text="", font=(FUENTE, 9, "bold"), padx=8, pady=2, wraplength=FOTO_W,
+                                   justify="left", bg=C["panel"])
         self.lbl_estado.pack(anchor="w", pady=(4, 0))
 
         self.v_url_actual = tk.StringVar()
         ttk.Entry(der, textvariable=self.v_url_actual, state="readonly").pack(fill="x", pady=(6, 0))
         fila_url = ttk.Frame(der, style="Panel.TFrame")
         fila_url.pack(fill="x", pady=(4, 0))
-        ttk.Button(fila_url, text="Copiar vínculo", command=self._copiar).pack(side="left")
-        ttk.Button(fila_url, text="Abrir", command=self._abrir).pack(side="left", padx=4)
-        ttk.Button(fila_url, text="🗑 Quitar", command=self._quitar).pack(side="left")
-        ttk.Button(fila_url, text="↩ Deshacer", command=self.app.deshacer).pack(side="right")
+        self._boton(fila_url, "Copiar", "copiar", self._copiar).pack(side="left")
+        self._boton(fila_url, "Abrir", "abrir", self._abrir).pack(side="left", padx=4)
+        self._boton(fila_url, "Quitar", "borrar", self._quitar, color=C["guinda"]).pack(side="left")
+        self._boton(fila_url, "Deshacer", "deshacer", self.app.deshacer).pack(side="right")
 
         # Opción 1: navegador
-        caja1 = ttk.LabelFrame(der, text=" 🔎 Buscar en Chrome ", style="Caja.TLabelframe", padding=8)
+        caja1 = ttk.LabelFrame(der, labelwidget=self._titulo_caja(der, "Buscar en Chrome", "buscar"),
+                               style="Caja.TLabelframe", padding=8)
         caja1.pack(fill="x", pady=(10, 0))
         self.v_consulta = tk.StringVar()
         ttk.Entry(caja1, textvariable=self.v_consulta).pack(fill="x")
         fila = ttk.Frame(caja1, style="Panel.TFrame")
         fila.pack(fill="x", pady=(6, 0))
-        ttk.Combobox(fila, textvariable=app_motor(self.app), values=list(MOTORES), state="readonly",
-                     width=8).pack(side="left")
-        ttk.Button(fila, text="Buscar imagen", style="Accent.TButton", command=self.buscar).pack(side="left", padx=6)
-        ttk.Checkbutton(caja1, text="Al capturar, pasar al siguiente sin imagen", variable=self.app.v_auto,
+        ttk.Combobox(fila, textvariable=self.app.v_motor, values=list(MOTORES), state="readonly", width=8).pack(side="left")
+        self._boton(fila, "Buscar imagen", "buscar", self.buscar, "Accent.TButton").pack(side="left", padx=6)
+        ttk.Checkbutton(caja1, text="Al capturar, pasar al siguiente pendiente", variable=self.app.v_auto,
                         style="Panel.TCheckbutton").pack(anchor="w", pady=(4, 0))
         ttk.Label(caja1, text="En Chrome haga clic en la foto correcta: se guarda sola.",
                   style="GrisPanel.TLabel").pack(anchor="w")
 
         # Opción 2: vínculo / archivo
-        caja2 = ttk.LabelFrame(der, text=" 🔗 Agregar a mano ", style="Caja.TLabelframe", padding=8)
+        caja2 = ttk.LabelFrame(der, labelwidget=self._titulo_caja(der, "Agregar a mano", "vinculo"),
+                               style="Caja.TLabelframe", padding=8)
         caja2.pack(fill="x", pady=(10, 0))
         self.v_url_nueva = tk.StringVar()
         fila2 = ttk.Frame(caja2, style="Panel.TFrame")
         fila2.pack(fill="x")
         ttk.Entry(fila2, textvariable=self.v_url_nueva).pack(side="left", fill="x", expand=True)
-        ttk.Button(fila2, text="Guardar vínculo", command=self._guardar_vinculo).pack(side="left", padx=(4, 0))
-        ttk.Button(caja2, text="📁 Subir foto (PNG, JPG, WEBP…)", command=self._subir_archivo).pack(fill="x", pady=(6, 0))
+        self._boton(fila2, "Guardar", "guardar", self._guardar_vinculo).pack(side="left", padx=(4, 0))
+        self._boton(caja2, "Subir foto (PNG, JPG, WEBP...)", "foto", self._subir_archivo).pack(fill="x", pady=(6, 0))
 
-
-    # ── datos
+    # Datos
     def poblar(self, items: list):
         self.items = items
         self.por_clave = {it["clave"]: it for it in items}
@@ -197,27 +217,41 @@ class PanelImagenes(ttk.Frame):
         self.actualizar_resumen()
 
     def estado_de(self, item: dict):
+        """(estado, url, motivo). «rota»: tiene vínculo pero la revisión no pudo ver la foto."""
         url = self.app.imagenes[self.tipo].get(item["clave"], "")
         if url:
-            return "ok", url
+            revision = self.app.revisadas.get(url)
+            if revision and not revision["ok"]:
+                return "rota", url, revision["motivo"]
+            return "ok", url, ""
         if self.tipo == "productos":
             # Igual que la app: si el producto no tiene foto usa la del primero de sus artículos que tenga
-            for art in self.app.catalogo.get("articulos", []):
-                if art["prod"] == item["clave"]:
-                    u = self.app.imagenes["articulos"].get(art["clave"])
-                    if u:
-                        return "hereda", u
-        return "falta", ""
+            u = self.app.foto_de_producto.get(item["clave"])
+            if u:
+                return "hereda", u, ""
+        return "falta", "", ""
+
+    def conteo(self):
+        cuenta = {"ok": 0, "rota": 0, "falta": 0, "hereda": 0}
+        for it in self.items:
+            cuenta[self.estado_de(it)[0]] += 1
+        return cuenta
 
     def actualizar_resumen(self):
         total = len(self.items)
-        faltan = sum(1 for it in self.items if self.estado_de(it)[0] == "falta")
-        con = total - faltan
-        self.lbl_resumen.configure(text=f"{con:,} de {total:,} {TITULOS[self.tipo][2:].lower()} con imagen")
-        self.barra["value"] = 100 * con / total if total else 0
-        self.lbl_faltan.configure(text=f"✗ {faltan} sin imagen" if faltan else "✓ Todos tienen imagen",
-                                  style="Falta.TLabel" if faltan else "Ok.TLabel")
-        self.app.pestanas.tab(self, text=f"{TITULOS[self.tipo]}  ({faltan})" if faltan else TITULOS[self.tipo])
+        c = self.conteo()
+        visibles = c["ok"] + c["hereda"]
+        self.lbl_resumen.configure(text=f"{visibles:,} de {total:,} {TITULOS[self.tipo].lower()} con foto visible")
+        self.barra["value"] = 100 * visibles / total if total else 0
+        self.lbl_faltan.configure(text=f"{c['falta']} sin foto" if c["falta"] else "Todos tienen foto",
+                                  style="Falta.TLabel" if c["falta"] else "Ok.TLabel")
+        self.lbl_rotas.configure(text=f" {c['rota']} no se ven" if c["rota"] else "")
+        if not c["rota"]:
+            self.lbl_rotas.configure(image="")
+        else:
+            self.lbl_rotas.configure(image=self.app.iconos.get("alerta", "#9A4A0B", 14))
+        pendientes = c["falta"] + c["rota"]
+        self.app.pestanas.tab(self, text=f" {TITULOS[self.tipo]}  ({pendientes})" if pendientes else f" {TITULOS[self.tipo]}")
 
     def _valores(self, it: dict):
         estado = self.estado_de(it)[0]
@@ -235,20 +269,21 @@ class PanelImagenes(ttk.Frame):
         filas = []
         for it in self.items:
             valores, estado = self._valores(it)
-            if filtro == "Sin imagen" and estado != "falta":
+            if filtro == "falta" and estado != "falta":
                 continue
-            if filtro == "Con imagen" and estado == "falta":
+            if filtro == "rota" and estado != "rota":
+                continue
+            if filtro == "ok" and estado not in ("ok", "hereda"):
                 continue
             if texto and texto not in sin_acentos(" ".join(str(v) for v in valores)):
                 continue
             filas.append((it, valores, estado))
         col, desc = self.orden
         i = [c for c, _, _ in COLUMNAS[self.tipo]].index(col)
-        prioridad = {"falta": 0, "hereda": 1, "ok": 2}
 
         def llave(f):
             if col == "estado":
-                return (prioridad[f[2]], f[1][2])
+                return (PRIORIDAD[f[2]], f[1][2])
             v = f[1][i]
             return (0, int(v), "") if str(v).isdigit() else (1, 0, str(v))
         filas.sort(key=llave, reverse=desc)
@@ -267,23 +302,31 @@ class PanelImagenes(ttk.Frame):
         if it and self.tabla.exists(k):
             valores, estado = self._valores(it)
             self.tabla.item(k, values=valores, tags=(estado,))
-        if self.tipo == "articulos":
-            self.app.paneles["productos"].refrescar()   # un producto puede tomar la foto de este artículo
-            self.app.paneles["productos"].actualizar_resumen()
         self.actualizar_resumen()
         if self.actual and self.actual["clave"] == k:
             self.mostrar(self.actual)
 
-    # ── selección y detalle
+    def repintar(self):
+        """Actualiza estados y colores sin rehacer la lista (después de revisar fotos)."""
+        for k in self.tabla.get_children():
+            it = self.por_clave.get(k)
+            if it:
+                valores, estado = self._valores(it)
+                self.tabla.item(k, values=valores, tags=(estado,))
+        self.actualizar_resumen()
+        if self.actual:
+            self.mostrar(self.actual, recargar_foto=False)
+
+    # Selección y detalle
     def _al_seleccionar(self):
         sel = self.tabla.selection()
         if sel and sel[0] in self.por_clave:
             self.mostrar(self.por_clave[sel[0]])
 
-    def mostrar(self, it: dict):
+    def mostrar(self, it: dict, recargar_foto=True):
         cambio = not self.actual or self.actual["clave"] != it["clave"]
         self.actual = it
-        estado, url = self.estado_de(it)
+        estado, url, motivo = self.estado_de(it)
         self.lbl_titulo.configure(text=it["nombre"])
         clave = {"articulos": "ART.", "productos": "PROD.", "proveedores": "CVE"}[self.tipo]
         if self.tipo == "articulos":
@@ -294,29 +337,30 @@ class PanelImagenes(ttk.Frame):
             n = it["articulos"]
             sub = f"{clave} {it['clave']} · {n} artículo{'s' if n != 1 else ''}"
         self.lbl_sub.configure(text=sub)
-        colores = {"ok": ("#E3F1EC", C["verde"]), "hereda": ("#FFF3D6", "#7A5C1E"), "falta": ("#FBE5E8", C["guinda"])}
-        fondo, letra = colores[estado]
-        self.lbl_estado.configure(text=ESTADOS[estado], bg=fondo, fg=letra)
+        fondo, letra = COLORES_ESTADO[estado]
+        self.lbl_estado.configure(text=ESTADOS[estado] + (f": {motivo}" if motivo else ""), bg=fondo, fg=letra)
         self.v_url_actual.set(url)
         if cambio:
             self.v_consulta.set(consulta_para(self.tipo, it))
             self.v_url_nueva.set("")
-        self.app.cargar_foto(url, self.lbl_foto, lambda: self.actual is it)
+        if recargar_foto or cambio:
+            self.app.cargar_foto(url, self.lbl_foto, lambda: self.actual is it)
 
-    def siguiente_sin_imagen(self) -> bool:
+    def siguiente_pendiente(self) -> bool:
+        """Elige el siguiente renglón sin foto o con una foto que no se ve."""
         filas = self.tabla.get_children()
         if not filas:
             return False
         inicio = filas.index(self.actual["clave"]) + 1 if self.actual and self.actual["clave"] in filas else 0
         for k in list(filas[inicio:]) + list(filas[:inicio]):
-            if self.estado_de(self.por_clave[k])[0] == "falta" and (not self.actual or k != self.actual["clave"]):
+            if self.estado_de(self.por_clave[k])[0] in ("falta", "rota") and (not self.actual or k != self.actual["clave"]):
                 self.tabla.selection_set(k)
                 self.tabla.see(k)
                 self.mostrar(self.por_clave[k])
                 return True
         return False
 
-    # ── acciones
+    # Acciones
     def _necesita_actual(self) -> bool:
         if not self.actual:
             messagebox.showinfo("Elija uno", f"Primero elija un {SINGULAR[self.tipo]} de la lista.")
@@ -358,24 +402,22 @@ class PanelImagenes(ttk.Frame):
             webbrowser.open(nucleo.url_visible(self.v_url_actual.get()))
 
 
-def app_motor(app):
-    return app.v_motor
-
-
-# ──────────────────────────────────────────────────────────────
 # Ventana principal
-# ──────────────────────────────────────────────────────────────
 class App:
     def __init__(self, raiz: tk.Tk):
         self.raiz = raiz
         self.config = nucleo.leer_config()
+        self.iconos = Iconos()
         self.cola: queue.Queue = queue.Queue()
         self.nav: Navegador | None = None
         self.objetivo = None            # (panel, item) de la última búsqueda en Chrome
         self.catalogo: dict = {}
         self.imagenes = {t: {} for t in COLUMNAS}
+        self.foto_de_producto: dict = {}  # PROD. -> foto del primero de sus artículos que tenga
         self.historial: list = []       # (tipo, clave, url anterior) para deshacer
         self.fotos: dict = {}           # url -> imagen PIL reducida
+        self.revisadas = self._leer_revisadas()
+        self.revisando = False
         self.candado_excel = threading.Lock()
 
         self.v_servidor = tk.StringVar(value=self.config["servidor"])
@@ -399,7 +441,7 @@ class App:
     def servidor(self) -> nucleo.Servidor:
         return nucleo.Servidor(self.v_servidor.get().strip(), self.v_token.get().strip())
 
-    # ── apariencia
+    # Apariencia
     def _estilos(self):
         self.raiz.configure(bg=C["fondo"])
         s = ttk.Style(self.raiz)
@@ -413,6 +455,7 @@ class App:
         s.configure("Titulo.TLabel", background=C["panel"], font=(FUENTE, 12, "bold"))
         s.configure("Resumen.TLabel", background=C["fondo"], font=(FUENTE, 12, "bold"))
         s.configure("Falta.TLabel", background=C["fondo"], foreground=C["guinda"], font=(FUENTE, 10, "bold"))
+        s.configure("Rota.TLabel", background=C["fondo"], foreground="#9A4A0B", font=(FUENTE, 10, "bold"))
         s.configure("Ok.TLabel", background=C["fondo"], foreground=C["verde"], font=(FUENTE, 10, "bold"))
         s.configure("Avance.Horizontal.TProgressbar", troughcolor="#E8E2D8", background=C["verde"],
                     bordercolor=C["borde"], lightcolor=C["verde"], darkcolor=C["verde"])
@@ -423,11 +466,17 @@ class App:
         s.configure("TNotebook.Tab", padding=(14, 6), font=(FUENTE, 10, "bold"))
         s.map("TNotebook.Tab", background=[("selected", C["panel"])], foreground=[("selected", C["guinda"])])
         s.configure("Caja.TLabelframe", background=C["panel"], bordercolor=C["borde"])
-        s.configure("Caja.TLabelframe.Label", background=C["panel"], foreground=C["guinda_osc"], font=(FUENTE, 10, "bold"))
+        s.configure("CajaTitulo.TLabel", background=C["panel"], foreground=C["guinda_osc"], font=(FUENTE, 10, "bold"))
+        s.configure("CajaFondo.TLabel", background=C["fondo"], foreground=C["guinda_osc"], font=(FUENTE, 10, "bold"))
+        s.configure("Caja2.TLabelframe", background=C["fondo"], bordercolor=C["borde"])
         s.configure("Panel.TCheckbutton", background=C["panel"])
         s.configure("Filtro.TRadiobutton", background=C["fondo"])
         s.configure("Accent.TButton", background=C["guinda"], foreground="white", font=(FUENTE, 10, "bold"))
         s.map("Accent.TButton", background=[("active", C["guinda_osc"]), ("disabled", "#C9A3AE")])
+
+    def _boton(self, padre, texto, icono, comando, estilo="TButton"):
+        img = self.iconos.get(icono, "white" if estilo == "Accent.TButton" else "#3A3A3A", 16)
+        return ttk.Button(padre, text=texto, image=img, compound="left" if img else "none", command=comando, style=estilo)
 
     def _construir(self):
         r = self.raiz
@@ -436,10 +485,12 @@ class App:
         tk.Label(cabeza, text="Abasto Bienestar", bg=C["guinda"], fg="white", font=(FUENTE, 16, "bold")).pack(side="left")
         tk.Label(cabeza, text="  ·  Imágenes y datos de la app", bg=C["guinda"], fg="#F2D6DD",
                  font=(FUENTE, 11)).pack(side="left", pady=(4, 0))
-        tk.Button(cabeza, text="⟳  Recargar", command=self.recargar, bg=C["guinda_osc"], fg="white", relief="flat",
-                  activebackground="#4A0E26", activeforeground="white", font=(FUENTE, 10, "bold"), padx=10,
-                  cursor="hand2").pack(side="right")
-        self.lbl_conexion = tk.Label(cabeza, text="● Sin conectar", bg=C["guinda"], fg="#F2D6DD", font=(FUENTE, 10))
+        img = self.iconos.get("recargar", "white", 16)
+        tk.Button(cabeza, text="  Recargar", image=img, compound="left" if img else "none", command=self.recargar,
+                  bg=C["guinda_osc"], fg="white", relief="flat", activebackground="#4A0E26", activeforeground="white",
+                  font=(FUENTE, 10, "bold"), padx=10, pady=3, cursor="hand2").pack(side="right")
+        self.lbl_conexion = tk.Label(cabeza, text=" Sin conectar", image=self.iconos.punto("#F2D6DD"), compound="left",
+                                     bg=C["guinda"], fg="#F2D6DD", font=(FUENTE, 10))
         self.lbl_conexion.pack(side="right", padx=12)
 
         # La bitácora se acomoda antes que las pestañas para que nunca quede fuera de la ventana
@@ -454,14 +505,14 @@ class App:
         self.paneles = {}
         for tipo in COLUMNAS:
             self.paneles[tipo] = PanelImagenes(self.pestanas, self, tipo)
-            self.pestanas.add(self.paneles[tipo], text=TITULOS[tipo])
+            self.pestanas.add(self.paneles[tipo], text=f" {TITULOS[tipo]}", image=self.iconos.get(tipo, C["guinda"], 18),
+                              compound="left")
         self.p_regiones = self._pestana_regiones()
         self.p_servidor = self._pestana_servidor()
 
-
     def _pestana_regiones(self):
         p = ttk.Frame(self.pestanas, style="Fondo.TFrame", padding=12)
-        self.pestanas.add(p, text="🗺️ Regiones")
+        self.pestanas.add(p, text=" Regiones", image=self.iconos.get("regiones", C["guinda"], 18), compound="left")
         ttk.Label(p, style="Fondo.TLabel", wraplength=900, justify="left", text=(
             "Las gerencias regionales se editan en la hoja REGIONES del Excel de imágenes: SIGLA, NOMBRE, CLAVE y "
             "UNIDADES (separadas por comas). Las siglas y los estados del mapa son fijos en la app.")).pack(anchor="w")
@@ -473,16 +524,15 @@ class App:
         self.tabla_reg.pack(fill="both", expand=True, pady=8)
         fila = ttk.Frame(p, style="Fondo.TFrame")
         fila.pack(anchor="w")
-        ttk.Button(fila, text="Ver las del servidor", command=lambda: self.tarea(
-            "Consultando las regiones…", self._regiones_servidor, lambda r: self._mostrar_regiones(*r))).pack(side="left")
-        ttk.Button(fila, text="📝 Escribir hoja REGIONES en el Excel", command=self._escribir_hoja).pack(side="left", padx=6)
-        ttk.Button(fila, text="⬆ Subir hoja REGIONES al servidor", style="Accent.TButton",
-                   command=self._subir_hoja).pack(side="left")
+        self._boton(fila, "Ver las del servidor", "recargar", lambda: self.tarea(
+            "Consultando las regiones", self._regiones_servidor, lambda r: self._mostrar_regiones(*r))).pack(side="left")
+        self._boton(fila, "Escribir hoja REGIONES en el Excel", "editar", self._escribir_hoja).pack(side="left", padx=6)
+        self._boton(fila, "Subir hoja REGIONES al servidor", "subir", self._subir_hoja, "Accent.TButton").pack(side="left")
         return p
 
     def _pestana_servidor(self):
         p = ttk.Frame(self.pestanas, style="Fondo.TFrame", padding=12)
-        self.pestanas.add(p, text="⚙️ Servidor")
+        self.pestanas.add(p, text=" Servidor", image=self.iconos.get("servidor", C["guinda"], 18), compound="left")
         campos = [("Dirección del servidor", self.v_servidor, {}),
                   ("Clave de administración (ADMIN_TOKEN)", self.v_token, {"show": "•"}),
                   ("Excel de imágenes (en esta computadora)", self.v_excel, {}),
@@ -490,7 +540,7 @@ class App:
         for i, (texto, var, extra) in enumerate(campos):
             ttk.Label(p, text=texto, style="Fondo.TLabel").grid(row=i, column=0, sticky="w", pady=3, padx=(0, 8))
             ttk.Entry(p, textvariable=var, width=80, **extra).grid(row=i, column=1, sticky="ew", pady=3)
-        ttk.Button(p, text="Elegir…", command=lambda: self.v_excel.set(
+        self._boton(p, "Elegir...", "carpeta", lambda: self.v_excel.set(
             filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")]) or self.v_excel.get())).grid(row=2, column=2, padx=4)
         p.columnconfigure(1, weight=1)
         ttk.Checkbutton(p, text="Guardar también cada cambio en ese Excel (columnas IMAGEN y FUENTE)",
@@ -498,49 +548,67 @@ class App:
 
         fila = ttk.Frame(p, style="Fondo.TFrame")
         fila.grid(row=5, column=0, columnspan=3, sticky="w", pady=12)
-        ttk.Button(fila, text="💾 Guardar ajustes", style="Accent.TButton", command=self._guardar_ajustes).pack(side="left")
-        ttk.Button(fila, text="Estado", command=lambda: self.tarea(
-            "Consultando el estado…", lambda: self.servidor().estado(),
+        self._boton(fila, "Guardar ajustes", "guardar", self._guardar_ajustes, "Accent.TButton").pack(side="left")
+        self._boton(fila, "Estado", "check", lambda: self.tarea(
+            "Consultando el estado", lambda: self.servidor().estado(),
             lambda e: self.anotar(nucleo.texto_estado(e)))).pack(side="left", padx=6)
-        ttk.Button(fila, text="🔄 Descargar el catálogo ahora", command=lambda: self.tarea(
-            "Descargando el catálogo de SharePoint…", lambda: self.servidor().sincronizar(),
-            lambda r: (self.anotar(f"✓ Catálogo descargado ({r['bytes'] / 1024:.0f} KB)."), self.recargar()))).pack(side="left")
-        ttk.Button(fila, text="Cambiar Excel del catálogo…", command=self._cambiar_link).pack(side="left", padx=6)
+        self._boton(fila, "Descargar el catálogo ahora", "sincronizar", lambda: self.tarea(
+            "Descargando el catálogo de SharePoint", lambda: self.servidor().sincronizar(),
+            lambda r: (self.anotar(f"Catálogo descargado ({r['bytes'] / 1024:.0f} KB)."), self.recargar()))).pack(side="left")
+        self._boton(fila, "Cambiar Excel del catálogo...", "editar", self._cambiar_link).pack(side="left", padx=6)
 
-        caja = ttk.LabelFrame(p, text=" Carga completa desde el Excel de imágenes ", style="Caja.TLabelframe", padding=10)
-        caja.grid(row=6, column=0, columnspan=3, sticky="ew")
-        ttk.Label(caja, style="GrisPanel.TLabel", wraplength=850, justify="left", text=(
+        caja_fotos = ttk.LabelFrame(p, labelwidget=ttk.Label(p, text=" Revisar fotos", style="CajaFondo.TLabel",
+                                                             image=self.iconos.get("alerta", C["guinda_osc"], 16),
+                                                             compound="left"),
+                                    style="Caja2.TLabelframe", padding=10)
+        caja_fotos.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+        ttk.Label(caja_fotos, style="Gris.TLabel", wraplength=850, justify="left", text=(
+            "Al abrir el programa se revisa que cada vínculo de foto todavía muestre una imagen (las que no, salen "
+            f"como «No se ve»). Cada vínculo se vuelve a revisar después de {DIAS_REVISION} días.")).pack(anchor="w")
+        self._boton(caja_fotos, "Revisar todas otra vez", "revisar", lambda: self.revisar_fotos(todas=True)).pack(
+            anchor="w", pady=(6, 0))
+
+        caja = ttk.LabelFrame(p, labelwidget=ttk.Label(p, text=" Carga completa desde el Excel de imágenes",
+                                                       style="CajaFondo.TLabel",
+                                                       image=self.iconos.get("subir", C["guinda_osc"], 16), compound="left"),
+                              style="Caja2.TLabelframe", padding=10)
+        caja.grid(row=7, column=0, columnspan=3, sticky="ew")
+        ttk.Label(caja, style="Gris.TLabel", wraplength=850, justify="left", text=(
             "La base de datos del servidor es la que manda. Use esto solo para cargar de golpe lo que está en el "
             "Excel: reemplaza en el servidor las imágenes de las claves que vienen en él.")).pack(anchor="w")
         self.v_reemplazar = tk.BooleanVar(value=False)
         ttk.Checkbutton(caja, text="Además, borrar del servidor las fotos de claves que no estén en el Excel",
-                        variable=self.v_reemplazar, style="Panel.TCheckbutton").pack(anchor="w", pady=4)
-        f2 = ttk.Frame(caja, style="Panel.TFrame")
+                        variable=self.v_reemplazar).pack(anchor="w", pady=4)
+        f2 = ttk.Frame(caja, style="Fondo.TFrame")
         f2.pack(anchor="w")
-        ttk.Button(f2, text="⬆ Subir el Excel de esta computadora",
-                   command=lambda: self._subir_excel(lambda: self.v_excel.get())).pack(side="left")
-        ttk.Button(f2, text="⬇⬆ Descargar el de OneDrive y subirlo",
-                   command=lambda: self._subir_excel(lambda: nucleo.descargar_excel_onedrive(self.v_link_img.get().strip()))
-                   ).pack(side="left", padx=6)
+        self._boton(f2, "Subir el Excel de esta computadora", "subir",
+                    lambda: self._subir_excel(lambda: self.v_excel.get())).pack(side="left")
+        self._boton(f2, "Descargar el de OneDrive y subirlo", "descargar",
+                    lambda: self._subir_excel(lambda: nucleo.descargar_excel_onedrive(self.v_link_img.get().strip()))
+                    ).pack(side="left", padx=6)
         return p
 
-    # ── utilidades
+    # Utilidades
     def anotar(self, texto: str):
         self.bitacora.configure(state="normal")
-        self.bitacora.insert("end", texto.rstrip() + "\n")
+        self.bitacora.insert("end", f"{datetime.now():%H:%M}  {texto.rstrip()}\n")
         self.bitacora.see("end")
         self.bitacora.configure(state="disabled")
+
+    def conexion(self, texto: str, color: str):
+        self.lbl_conexion.configure(text=" " + texto, image=self.iconos.punto(color), fg=color)
 
     def tarea(self, descripcion: str, fn, al_terminar=None, silencioso=False):
         """Corre fn en otro hilo para que la ventana no se congele; al_terminar(resultado) corre en la ventana."""
         if descripcion:
-            self.anotar(f"… {descripcion}")
+            self.anotar(f"{descripcion}...")
 
         def correr():
             try:
                 resultado = fn()
-            except Exception as e:  # noqa: BLE001 — cualquier error se muestra
-                self.raiz.after(0, lambda e=e: (self.anotar(f"✗ {e}"), None if silencioso else messagebox.showerror("Error", str(e))))
+            except Exception as e:  # noqa: BLE001 (cualquier error se muestra)
+                self.raiz.after(0, lambda e=e: (self.anotar(f"Error: {e}"),
+                                                None if silencioso else messagebox.showerror("Error", str(e))))
                 return
             if al_terminar:
                 self.raiz.after(0, lambda: al_terminar(resultado))
@@ -559,7 +627,14 @@ class App:
             pass
         self.raiz.after(150, self._sondear)
 
-    # ── datos
+    # Datos
+    def _calcular_herencia(self):
+        self.foto_de_producto = {}
+        for a in self.catalogo.get("articulos", []):
+            u = self.imagenes["articulos"].get(a["clave"])
+            if u and a["prod"] not in self.foto_de_producto:
+                self.foto_de_producto[a["prod"]] = u
+
     def recargar(self):
         def hacer():
             srv = self.servidor()
@@ -570,20 +645,83 @@ class App:
             estado, catalogo, imagenes = r
             self.catalogo = catalogo
             self.imagenes = {t: dict(imagenes.get(t, {})) for t in COLUMNAS}
+            self._calcular_herencia()
             for tipo, panel in self.paneles.items():
                 panel.poblar(catalogo[tipo])
             c = estado["catalogo"]
-            hora = hora_local(c.get("actualizado"))
-            self.lbl_conexion.configure(text=f"● Conectado · catálogo del {hora}" + (" · ⚠ error" if c.get("error") else ""),
-                                        fg="#BFF0D8")
-            faltan = {t: sum(1 for it in self.paneles[t].items if self.paneles[t].estado_de(it)[0] == "falta") for t in COLUMNAS}
-            self.anotar(f"✓ Datos cargados. Sin imagen: {faltan['articulos']} artículos, {faltan['productos']} productos, "
-                        f"{faltan['proveedores']} proveedores.")
+            self.conexion(f"Conectado · catálogo del {hora_local(c.get('actualizado'))}" + (" · con error" if c.get("error") else ""),
+                          "#FFD1A6" if c.get("error") else "#BFF0D8")
+            cuentas = {t: self.paneles[t].conteo() for t in COLUMNAS}
+            self.anotar("Datos cargados. Sin foto: " + ", ".join(f"{cuentas[t]['falta']} {TITULOS[t].lower()}" for t in COLUMNAS) + ".")
             if c.get("error"):
-                self.anotar(f"⚠ Último error al descargar el catálogo: {c['error']}")
+                self.anotar(f"Último error al descargar el catálogo: {c['error']}")
+            self.revisar_fotos()
 
-        self.lbl_conexion.configure(text="● Conectando…", fg="#F2D6DD")
-        self.tarea("Cargando el catálogo y las imágenes del servidor…", hacer, listo)
+        self.conexion("Conectando...", "#F2D6DD")
+        self.tarea("Cargando el catálogo y las imágenes del servidor", hacer, listo)
+
+    # Revisión de fotos: qué vínculos ya no muestran una imagen
+    def _leer_revisadas(self) -> dict:
+        try:
+            return json.loads(ARCHIVO_REVISION.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _guardar_revisadas(self):
+        try:
+            ARCHIVO_REVISION.write_text(json.dumps(self.revisadas, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+
+    def revisar_fotos(self, todas=False):
+        """Revisa en segundo plano los vínculos sin revisar (o vencidos); con todas=True, todos."""
+        if self.revisando:
+            return
+        limite = (datetime.now(timezone.utc) - timedelta(days=DIAS_REVISION)).isoformat()
+        urls = sorted({u for m in self.imagenes.values() for u in m.values() if u})
+        pendientes = [u for u in urls if todas or u not in self.revisadas or self.revisadas[u]["fecha"] < limite]
+        if not pendientes:
+            self._resumen_revision()
+            return
+        self.revisando = True
+        self.anotar(f"Revisando {len(pendientes)} vínculos de fotos en segundo plano (puede tardar unos minutos)...")
+        total, hechas = len(pendientes), [0]
+
+        def revisar(url):
+            ok, motivo = nucleo.revisar_imagen(url)
+            return url, {"ok": ok, "motivo": motivo, "fecha": datetime.now(timezone.utc).isoformat()}
+
+        def correr():
+            with ThreadPoolExecutor(max_workers=12) as grupo:
+                for url, resultado in grupo.map(revisar, pendientes):
+                    self.revisadas[url] = resultado
+                    hechas[0] += 1
+                    if hechas[0] % 50 == 0 or hechas[0] == total:
+                        self.raiz.after(0, lambda n=hechas[0]: self._avance_revision(n, total))
+            self._guardar_revisadas()
+            self.raiz.after(0, self._fin_revision)
+
+        threading.Thread(target=correr, daemon=True).start()
+
+    def _avance_revision(self, n, total):
+        self.conexion(f"Revisando fotos {n} de {total}", "#F2D6DD")
+        for panel in self.paneles.values():
+            panel.repintar()
+
+    def _fin_revision(self):
+        self.revisando = False
+        for panel in self.paneles.values():
+            panel.repintar()
+        self._resumen_revision()
+        self.conexion("Conectado · fotos revisadas", "#BFF0D8")
+
+    def _resumen_revision(self):
+        cuentas = {t: self.paneles[t].conteo()["rota"] for t in COLUMNAS}
+        if any(cuentas.values()):
+            self.anotar("Fotos que no se ven: " + ", ".join(f"{cuentas[t]} {TITULOS[t].lower()}" for t in COLUMNAS)
+                        + ". Use el filtro «No se ve» para verlas.")
+        else:
+            self.anotar("Todas las fotos se ven.")
 
     def cargar_foto(self, url: str, etiqueta: tk.Label, vigente):
         """Vista previa en otro hilo; solo se pone si el renglón sigue elegido (vigente())."""
@@ -591,12 +729,12 @@ class App:
             etiqueta.configure(image="", text="(instale Pillow para ver la foto)")
             return
         if not url:
-            etiqueta.configure(image="", text="Sin imagen\n\nBúsquela en Chrome o agréguela a mano 👇")
+            etiqueta.configure(image="", text="Sin foto\n\nBúsquela en Chrome o agréguela a mano")
             return
         if url in self.fotos:
             self._poner_foto(etiqueta, self.fotos[url])
             return
-        etiqueta.configure(image="", text="Cargando la foto…")
+        etiqueta.configure(image="", text="Cargando la foto...")
 
         def bajar():
             try:
@@ -619,12 +757,21 @@ class App:
         etiqueta.foto = ImageTk.PhotoImage(img)
         etiqueta.configure(image=etiqueta.foto, text="")
 
-    # ── cambios
+    # Cambios
     def guardar(self, tipo: str, k: str, url: str, fuente: str | None = None, despues=None, deshacer=True):
         anterior = self.imagenes[tipo].get(k, "")
 
         def hacer():
             self.servidor().guardar_imagenes({tipo: {k: url}})
+
+        def revisar_nueva():
+            # El vínculo nuevo se revisa aparte, sin hacer esperar al guardado
+            ok, motivo = nucleo.revisar_imagen(url)
+            self.revisadas[url] = {"ok": ok, "motivo": motivo, "fecha": datetime.now(timezone.utc).isoformat()}
+            if not ok:
+                self.raiz.after(0, lambda: (self.anotar(f"Aviso: la foto de {SINGULAR[tipo]} {k} no se ve ({motivo})."),
+                                            self.paneles[tipo].actualizar_fila(k)))
+            self._guardar_revisadas()
 
         def listo(_):
             if url:
@@ -633,8 +780,14 @@ class App:
                 self.imagenes[tipo].pop(k, None)
             if deshacer:
                 self.historial.append((tipo, k, anterior))
+            if tipo == "articulos":
+                self._calcular_herencia()
+                self.paneles["productos"].repintar()   # un producto puede tomar la foto de este artículo
             nombre = self.paneles[tipo].por_clave.get(k, {}).get("nombre", k)
-            self.anotar(f"✓ {'Guardada' if url else 'Quitada'} la imagen de {SINGULAR[tipo]} {k} · {nombre}")
+            self.anotar(f"{'Guardada' if url else 'Quitada'} la imagen de {SINGULAR[tipo]} {k} · {nombre}")
+            if url:
+                self.revisadas.pop(url, None)  # mientras se revisa, cuenta como visible
+                threading.Thread(target=revisar_nueva, daemon=True).start()
             self.paneles[tipo].actualizar_fila(k)
             if self.v_excel_tambien.get():
                 self._escribir_excel(tipo, k, url, fuente)
@@ -649,31 +802,31 @@ class App:
         def hacer():
             with self.candado_excel:  # uno a la vez: dos guardados juntos dañarían el archivo
                 nucleo.escribir_imagen_en_excel(ruta, tipo, k, url, fuente)
-        self.tarea("", hacer, lambda _: self.anotar(f"  también en {Path(ruta).name}"), silencioso=True)
+        self.tarea("", hacer, lambda _: self.anotar(f"  También en {Path(ruta).name}."), silencioso=True)
 
     def deshacer(self):
         if not self.historial:
             self.anotar("No hay cambios que deshacer.")
             return
         tipo, k, anterior = self.historial.pop()
-        self.anotar(f"↩ Deshaciendo el cambio de {SINGULAR[tipo]} {k}…")
+        self.anotar(f"Deshaciendo el cambio de {SINGULAR[tipo]} {k}...")
         self.guardar(tipo, k, anterior, deshacer=False)
 
     def subir_archivo(self, tipo: str, item: dict, ruta: str):
         def hacer():
             return nucleo.subir_foto(self.servidor(), ruta, tipo, item["clave"])
-        self.tarea(f"Subiendo {Path(ruta).name}…", hacer,
+        self.tarea(f"Subiendo {Path(ruta).name}", hacer,
                    lambda url: self.guardar(tipo, item["clave"], url, f"Archivo subido: {Path(ruta).name}"))
 
-    # ── Chrome
+    # Chrome
     def buscar(self, panel: PanelImagenes, item: dict, consulta: str):
         if self.nav is None or not self.nav.vivo:
             self.nav = Navegador(self.cola)
             self.nav.start()
-            self.anotar("Abriendo Chrome…")
+            self.anotar("Abriendo Chrome...")
         self.objetivo = (panel, item)
         self.nav.ir(url_busqueda(self.v_motor.get(), consulta))
-        self.anotar(f"🔎 {consulta}  →  haga clic en la foto correcta en Chrome")
+        self.anotar(f"Buscando «{consulta}»: haga clic en la foto correcta en Chrome.")
 
     def _al_capturar(self, info: dict):
         url = (info.get("img") or "").strip()
@@ -688,14 +841,14 @@ class App:
 
         def despues():
             if self.v_auto.get() and panel.actual is item:
-                if panel.siguiente_sin_imagen():
+                if panel.siguiente_pendiente():
                     self.raiz.after(500, panel.buscar)
                 else:
-                    self.anotar(f"🎉 Ya no quedan {TITULOS[panel.tipo][2:].lower()} sin imagen en la lista.")
+                    self.anotar(f"Ya no quedan {TITULOS[panel.tipo].lower()} pendientes en la lista.")
 
         self.guardar(panel.tipo, item["clave"], url, fuente, despues)
 
-    # ── regiones
+    # Regiones
     def _regiones_servidor(self):
         regiones = self.servidor().regiones()
         if regiones:
@@ -707,36 +860,36 @@ class App:
         self.tabla_reg.delete(*self.tabla_reg.get_children())
         for r in regiones:
             self.tabla_reg.insert("", "end", values=(r["sigla"], r["nombre"], r["clave"], ", ".join(r["unidades"])))
-        self.anotar(f"✓ {len(regiones)} regiones ({origen}).")
+        self.anotar(f"{len(regiones)} regiones ({origen}).")
 
     def _escribir_hoja(self):
         def hacer():
             regiones, origen = self._regiones_servidor()
             nucleo.escribir_regiones_en_excel(self.v_excel.get(), regiones)
             return regiones, f"{origen}; escritas en la hoja REGIONES"
-        self.tarea("Escribiendo la hoja REGIONES…", hacer, lambda r: self._mostrar_regiones(*r))
+        self.tarea("Escribiendo la hoja REGIONES", hacer, lambda r: self._mostrar_regiones(*r))
 
     def _subir_hoja(self):
         def hacer():
             regiones = nucleo.leer_regiones(self.v_excel.get())
             self.servidor().guardar_regiones(regiones)
             return regiones, "de la hoja REGIONES, guardadas en el servidor"
-        self.tarea("Subiendo la hoja REGIONES…", hacer, lambda r: self._mostrar_regiones(*r))
+        self.tarea("Subiendo la hoja REGIONES", hacer, lambda r: self._mostrar_regiones(*r))
 
-    # ── servidor
+    # Servidor
     def _guardar_ajustes(self):
         nucleo.guardar_config({**self.config, "servidor": self.v_servidor.get().strip(), "token": self.v_token.get().strip(),
                                "excel": self.v_excel.get().strip(), "link_imagenes": self.v_link_img.get().strip(),
                                "guardar_en_excel": self.v_excel_tambien.get()})
-        self.anotar(f"✓ Ajustes guardados en {nucleo.ARCHIVO_CONFIG.name}.")
+        self.anotar(f"Ajustes guardados en {nucleo.ARCHIVO_CONFIG.name}.")
         self.recargar()
 
     def _cambiar_link(self):
         nuevo = tk.simpledialog.askstring("Excel del catálogo", "Vínculo para compartir del nuevo Excel del catálogo:",
                                           parent=self.raiz)
         if nuevo:
-            self.tarea("Probando el vínculo nuevo…", lambda: self.servidor().cambiar_link_catalogo(nuevo.strip()),
-                       lambda r: (self.anotar(f"✓ Vínculo cambiado; Excel descargado ({r['bytes'] / 1024:.0f} KB)."),
+            self.tarea("Probando el vínculo nuevo", lambda: self.servidor().cambiar_link_catalogo(nuevo.strip()),
+                       lambda r: (self.anotar(f"Vínculo cambiado; Excel descargado ({r['bytes'] / 1024:.0f} KB)."),
                                   self.recargar()))
 
     def _subir_excel(self, ruta_fn):
@@ -751,12 +904,13 @@ class App:
             if not self.v_reemplazar.get():
                 mapas = {t: {k: u for k, u in m.items() if u} for t, m in mapas.items()}
             return mapas, self.servidor().guardar_imagenes(mapas, self.v_reemplazar.get())
-        self.tarea("Subiendo las imágenes del Excel…", hacer,
-                   lambda r: (self.anotar("✓ " + nucleo.texto_subida(*r)), self.recargar()))
+        self.tarea("Subiendo las imágenes del Excel", hacer,
+                   lambda r: (self.anotar(nucleo.texto_subida(*r)), self.recargar()))
 
     def _salir(self):
         if self.nav and self.nav.vivo:
             self.nav.cerrar()
+        self._guardar_revisadas()
         self.raiz.destroy()
 
 

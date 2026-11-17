@@ -13,3 +13,7 @@ admin_config.json
 *.xlsx
 
 __pycache__/
+
+
+# Resultado local de revisar los vínculos de fotos
+.fotos_revisadas.json

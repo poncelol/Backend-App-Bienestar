@@ -86,9 +86,7 @@ REGIONES_APP = [
 NAVEGADOR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 
-# ──────────────────────────────────────────────────────────────
 # Configuración
-# ──────────────────────────────────────────────────────────────
 def excel_por_defecto() -> str:
     """El mismo Excel que usa `npm run imagenes`: datos/config.json (excelImagenes) o datos/imagenes.xlsx."""
     config = RAIZ / "datos" / "config.json"
@@ -131,9 +129,7 @@ def guardar_config(config: dict):
     ARCHIVO_CONFIG.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-# ──────────────────────────────────────────────────────────────
 # Servidor
-# ──────────────────────────────────────────────────────────────
 class Servidor:
     def __init__(self, url: str, token: str):
         if not url:
@@ -199,9 +195,7 @@ class Servidor:
                            headers={"Content-Type": tipo_mime})
 
 
-# ──────────────────────────────────────────────────────────────
 # Excel
-# ──────────────────────────────────────────────────────────────
 def clave(v) -> str:
     """653.0 -> "653", como en la app."""
     if v is None:
@@ -399,22 +393,47 @@ def descargar_excel_onedrive(link: str) -> str:
     return str(destino)
 
 
-# ──────────────────────────────────────────────────────────────
 # Fotos
-# ──────────────────────────────────────────────────────────────
-def preparar_foto(ruta: str, max_px=1200):
-    """Reduce la foto a max_px de lado (las tarjetas usan 400 px y la ficha 800): JPEG, o PNG si tiene transparencia."""
+def preparar_foto(ruta: str, max_px=800):
+    """Acepta PNG, JPG, WEBP, GIF, BMP o TIFF y la deja ligera para no llenar el almacenamiento del servidor: a lo más
+    800 px de lado (lo más grande que muestra la app es la ficha, de 800) y en WEBP, que pesa unos 40-80 KB y conserva
+    la transparencia de los logotipos. Así caben miles de fotos en el 1 GB gratuito."""
     from PIL import Image  # solo hace falta para subir archivos
 
     with Image.open(ruta) as img:
         img.thumbnail((max_px, max_px))
-        transparente = img.mode in ("RGBA", "LA", "P") and "transparency" in img.info or img.mode in ("RGBA", "LA")
+        transparente = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+        img = img.convert("RGBA" if transparente else "RGB")
         salida = io.BytesIO()
-        if transparente:
-            img.save(salida, "PNG", optimize=True)
-            return salida.getvalue(), "image/png", "png"
-        img.convert("RGB").save(salida, "JPEG", quality=85, optimize=True)
-        return salida.getvalue(), "image/jpeg", "jpg"
+        img.save(salida, "WEBP", quality=80, method=6)
+        return salida.getvalue(), "image/webp", "webp"
+
+
+def revisar_imagen(url: str) -> tuple[bool, str]:
+    """¿La foto se puede ver? Pide solo el inicio del archivo y revisa que sea una imagen. (ok, motivo)."""
+    try:
+        r = requests.get(url_visible(url), headers=NAVEGADOR, timeout=12, stream=True, allow_redirects=True)
+    except requests.exceptions.SSLError:
+        return False, "certificado del sitio inválido"
+    except requests.exceptions.Timeout:
+        return False, "el sitio tardó demasiado"
+    except requests.RequestException:
+        return False, "no hubo conexión con el sitio"
+    try:
+        if r.status_code != 200:
+            return False, {403: "el sitio no permite usarla (403)", 404: "ya no existe (404)"}.get(
+                r.status_code, f"el sitio respondió {r.status_code}")
+        inicio = next(r.iter_content(64), b"")
+        firmas = (b"\xff\xd8\xff", b"\x89PNG", b"GIF8", b"BM", b"II*\x00", b"MM\x00*")
+        if inicio.startswith(firmas) or inicio[8:12] in (b"WEBP", b"avif", b"heic") or inicio.lstrip().startswith(b"<svg"):
+            return True, ""
+        if (r.headers.get("Content-Type") or "").startswith("image/"):
+            return True, ""
+        return False, "el vínculo es una página, no una imagen"
+    except requests.RequestException:
+        return False, "se cortó la descarga"
+    finally:
+        r.close()
 
 
 def subir_foto(srv: Servidor, ruta: str, tipo: str, k: str) -> str:
@@ -423,18 +442,16 @@ def subir_foto(srv: Servidor, ruta: str, tipo: str, k: str) -> str:
     return srv.subir_foto(nombre, contenido, mime)["url"]
 
 
-# ──────────────────────────────────────────────────────────────
 # Resúmenes
-# ──────────────────────────────────────────────────────────────
 def texto_estado(e: dict) -> str:
     c = e["catalogo"]
     lineas = [
         f"Catálogo: actualizado {c['actualizado'] or '—'} · revisado {c['revisado'] or '—'} · {c['bytes'] / 1024:.0f} KB",
     ]
     if "vinculo" in c:
-        lineas.append(f"  Vínculo: {c['vinculo'] or '⚠ falta (pestaña Servidor › Cambiar Excel del catálogo)'}")
+        lineas.append(f"  Vínculo: {c['vinculo'] or 'falta (pestaña Servidor › Cambiar Excel del catálogo)'}")
     if c.get("error"):
-        lineas.append(f"  ⚠ Último error: {c['error']}")
+        lineas.append(f"  Último error: {c['error']}")
     i = e["imagenes"]
     lineas.append(f"Imágenes: {i['proveedores']} proveedores · {i['productos']} productos · {i['articulos']} artículos")
     lineas.append(f"Regiones en el servidor: {e['regiones'] or 'ninguna (la app usa las suyas)'}")
@@ -447,9 +464,7 @@ def texto_subida(mapas: dict, r: dict) -> str:
     return f"Imágenes guardadas: {', '.join(partes)}{extra}."
 
 
-# ──────────────────────────────────────────────────────────────
 # Línea de comandos
-# ──────────────────────────────────────────────────────────────
 def linea_de_comandos(args) -> int:
     config = leer_config()
     srv = Servidor(config["servidor"], config["token"])

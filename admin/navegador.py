@@ -84,7 +84,7 @@ JS_CAPTURA = r"""
     if (info.img === last.u && now - last.t < 1500) return;
     last = {u: info.img, t: now};
     window.pyPick(JSON.stringify(info))
-      .then((r) => toast(r || '✔ Imagen capturada', true))
+      .then((r) => toast(r || 'Imagen capturada', true))
       .catch(() => toast('No se pudo guardar', false));
   }, true);
 })();
@@ -123,7 +123,7 @@ class Navegador(threading.Thread):
             self.cola.put(("pick", json.loads(raw)))
         except ValueError:
             return "No se entendió la imagen"
-        return "✔ Imagen capturada"
+        return "Imagen capturada"
 
     def run(self):
         try:

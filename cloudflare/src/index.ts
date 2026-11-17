@@ -71,7 +71,8 @@ export default {
 
   async scheduled(_controlador, env, ctx) {
     ctx.waitUntil(sincronizar(env).then(
-      (r) => console.log(r.cambio ? `Catálogo actualizado (${r.bytes} bytes)` : 'Catálogo sin cambios'),
+      (r) => console.log(r.cambio ? `Catálogo actualizado (${r.bytes} bytes)`
+        : r.descargado ? 'Catálogo sin cambios (se descargó para comparar)' : 'Catálogo sin cambios (no se descargó)'),
       (e) => console.error('No se pudo descargar el catálogo:', e.message),
     ));
   },

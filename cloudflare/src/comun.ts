@@ -73,10 +73,24 @@ export const vinculoCatalogo = (env: Env, config: Record<string, string>) => con
 // ──────────────────────────────────────────────────────────────
 // Catálogo: copia del Excel de SharePoint
 // ──────────────────────────────────────────────────────────────
-export type Resultado = { cambio: boolean; sha256: string; bytes: number; actualizado: string };
+export type Resultado = { cambio: boolean; sha256: string; bytes: number; actualizado: string; descargado: boolean };
+
+/** Versión del archivo según SharePoint (ETag, p. ej. "{…},19"), o '' si no la da. */
+async function versionSharePoint(url: string): Promise<string> {
+  try {
+    const r = await fetch(url, { method: 'HEAD', headers: NAVEGADOR });
+    return r.ok ? (r.headers.get('ETag') ?? '') : '';
+  } catch {
+    return '';
+  }
+}
 
 /**
- * Descarga el Excel del catálogo y, si cambió (o con `forzar`), borra la copia guardada y guarda la nueva.
+ * Revisa el Excel del catálogo y, si cambió (o con `forzar`), borra la copia guardada y guarda la nueva.
+ *
+ * Primero le pregunta a SharePoint solo la versión del archivo (petición HEAD, sin descargarlo): si es la misma que la
+ * de la copia guardada, no descarga nada. SharePoint no responde «304 sin cambios», por eso se compara su ETag.
+ * Si cambió (o SharePoint no da la versión), lo descarga y además compara la huella SHA-256 del contenido.
  * Con `link` prueba otro vínculo y, si funciona, lo deja como el del catálogo.
  */
 export async function sincronizar(env: Env, { forzar = false, link }: { forzar?: boolean; link?: string } = {}): Promise<Resultado> {
@@ -85,9 +99,16 @@ export async function sincronizar(env: Env, { forzar = false, link }: { forzar?:
   const revisado = ahora();
   try {
     if (!vinculo) throw new Error('Falta el vínculo del catálogo: guárdelo con admin_bienestar.py o con npx wrangler secret put LINK_CATALOGO.');
+    const url = urlDescarga(vinculo);
+    const version = forzar || link ? '' : await versionSharePoint(url);
+    if (version && version === config.catalogo_version && config.catalogo_sha256) {
+      await env.DB.batch([guardar(env, 'catalogo_revisado', revisado), guardar(env, 'catalogo_error', '')]);
+      return { cambio: false, descargado: false, sha256: config.catalogo_sha256, bytes: Number(config.catalogo_bytes ?? 0),
+        actualizado: config.catalogo_actualizado };
+    }
     let r: Response;
     try {
-      r = await fetch(urlDescarga(vinculo), { headers: NAVEGADOR });
+      r = await fetch(url, { headers: NAVEGADOR });
     } catch {
       throw new Error('No hubo conexión con SharePoint.');
     }
@@ -115,8 +136,10 @@ export async function sincronizar(env: Env, { forzar = false, link }: { forzar?:
         guardar(env, 'catalogo_bytes', String(contenido.byteLength)),
       ] : []),
       ...(link ? [guardar(env, 'link_catalogo', link)] : []),
+      // La versión de SharePoint de esta descarga, para la próxima revisión
+      guardar(env, 'catalogo_version', r.headers.get('ETag') ?? ''),
     ]);
-    return { cambio, sha256, bytes: contenido.byteLength, actualizado };
+    return { cambio, descargado: true, sha256, bytes: contenido.byteLength, actualizado };
   } catch (e) {
     const mensaje = e instanceof Error ? e.message : String(e);
     // Un vínculo nuevo que no funciona no se guarda ni cuenta como error del catálogo actual
@@ -158,12 +181,14 @@ export const publicarRegiones = (env: Env, cuando: string) =>
     SELECT 'regiones', json_group_array(json_object('sigla', sigla, 'nombre', nombre, 'clave', clave, 'unidades', json(unidades))), ?1
     FROM (SELECT * FROM regiones ORDER BY clave, sigla)`).bind(cuando);
 
-export async function publicado(env: Env, nombre: string, vacio: string): Promise<Response> {
+/** JSON publicado (imágenes o regiones). Con If-None-Match igual a su versión responde 304 sin cuerpo. */
+export async function publicado(env: Env, request: Request, nombre: string, vacio: string): Promise<Response> {
   const fila = await env.DB.prepare('SELECT json, actualizado FROM publicado WHERE nombre = ?1').bind(nombre)
     .first<{ json: string; actualizado: string }>();
-  return new Response(fila?.json ?? vacio, {
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Actualizado': fila?.actualizado ?? '', ...CORS },
-  });
+  const etag = `"${fila?.actualizado ?? 'vacio'}"`;
+  const encabezados = { 'Cache-Control': 'no-cache', 'X-Actualizado': fila?.actualizado ?? '', ETag: etag, ...CORS };
+  if (request.headers.get('If-None-Match') === etag) return new Response(null, { status: 304, headers: encabezados });
+  return new Response(fila?.json ?? vacio, { headers: { 'Content-Type': 'application/json; charset=utf-8', ...encabezados } });
 }
 
 export async function guardarImagenes(env: Env, cuerpo: unknown) {
@@ -316,8 +341,8 @@ export async function rutaAdmin(env: Env, request: Request, ruta: string, origen
 /** Rutas de solo lectura que también usa el panel. Devuelve null si la ruta no existe. */
 export async function rutaLectura(env: Env, request: Request, pathname: string): Promise<Response | null> {
   if (pathname === '/api/catalogo') return catalogo(env, request);
-  if (pathname === '/api/imagenes') return publicado(env, 'imagenes', '{"proveedores":{},"productos":{},"articulos":{}}');
-  if (pathname === '/api/regiones') return publicado(env, 'regiones', '[]');
+  if (pathname === '/api/imagenes') return publicado(env, request, 'imagenes', '{"proveedores":{},"productos":{},"articulos":{}}');
+  if (pathname === '/api/regiones') return publicado(env, request, 'regiones', '[]');
   if (pathname.startsWith('/fotos/')) return verFoto(env, nombreFoto(pathname.slice(7)));
   return null;
 }
